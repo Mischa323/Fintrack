@@ -1,0 +1,100 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Account {
+  id           String                 @id @default(cuid())
+  name         String
+  type         AccountType
+  currency     String                 @default("EUR")
+  balance      Decimal                @default(0) @db.Decimal(15, 2)
+  color        String                 @default("#6366f1")
+  icon         String?
+  institution  String?
+  createdAt    DateTime               @default(now())
+  updatedAt    DateTime               @updatedAt
+  transactions Transaction[]
+  recurring    RecurringTransaction[]
+}
+
+model Category {
+  id           String                 @id @default(cuid())
+  name         String                 @unique
+  color        String                 @default("#6366f1")
+  icon         String?
+  parentId     String?
+  parent       Category?              @relation("SubCategories", fields: [parentId], references: [id])
+  children     Category[]             @relation("SubCategories")
+  transactions Transaction[]
+  recurring    RecurringTransaction[]
+  createdAt    DateTime               @default(now())
+}
+
+model Transaction {
+  id           String                @id @default(cuid())
+  accountId    String
+  account      Account               @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  categoryId   String?
+  category     Category?             @relation(fields: [categoryId], references: [id])
+  amount       Decimal               @db.Decimal(15, 2)
+  description  String
+  date         DateTime
+  type         TransactionType
+  notes        String?
+  recurringId  String?
+  recurring    RecurringTransaction? @relation(fields: [recurringId], references: [id])
+  importedFrom String?
+  externalId   String?
+  createdAt    DateTime              @default(now())
+  updatedAt    DateTime              @updatedAt
+
+  @@unique([externalId, accountId])
+}
+
+model RecurringTransaction {
+  id           String          @id @default(cuid())
+  accountId    String
+  account      Account         @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  categoryId   String?
+  category     Category?       @relation(fields: [categoryId], references: [id])
+  amount       Decimal         @db.Decimal(15, 2)
+  description  String
+  type         TransactionType
+  frequency    Frequency
+  startDate    DateTime
+  endDate      DateTime?
+  nextDate     DateTime
+  active       Boolean         @default(true)
+  transactions Transaction[]
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
+}
+
+enum AccountType {
+  CHECKING
+  SAVINGS
+  CREDIT_CARD
+  INVESTMENT
+  CASH
+  OTHER
+}
+
+enum TransactionType {
+  INCOME
+  EXPENSE
+  TRANSFER
+}
+
+enum Frequency {
+  DAILY
+  WEEKLY
+  BIWEEKLY
+  MONTHLY
+  QUARTERLY
+  YEARLY
+}
