@@ -1,9 +1,6 @@
-FROM node:20-alpine AS base
+FROM node:20-alpine AS builder
 WORKDIR /app
 COPY package*.json ./
-RUN npm ci --only=production
-
-FROM base AS builder
 RUN npm ci
 COPY prisma ./prisma
 RUN npx prisma generate
@@ -15,7 +12,7 @@ COPY --from=builder /app/prisma ./prisma
 COPY src ./src
 COPY package.json ./
 
-RUN mkdir -p uploads
+RUN mkdir -p data uploads
 
 EXPOSE 3001
 

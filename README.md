@@ -7,7 +7,7 @@ A self-hosted finance tracker with a liquid glass UI, multi-account support, rec
 1. **Copy the env file**
    ```bash
    cp .env.example .env
-   # Edit .env and set a strong DB_PASSWORD
+   # No credentials needed — uses SQLite (like the dmarc-dashboard project)
    ```
 
 2. **Deploy via Portainer**
@@ -63,15 +63,13 @@ Duplicate detection uses the `id` field from Maybe exports — re-importing the 
 |-----------|-------------------------------------|
 | Frontend  | React 18, Vite, Recharts, Tailwind  |
 | Backend   | Node.js, Express, Prisma ORM        |
-| Database  | PostgreSQL 16                       |
+| Database  | SQLite (via Prisma ORM)             |
 | Proxy     | Nginx                               |
 | Container | Docker / Portainer                  |
 
 ## Environment Variables
 
-| Variable      | Default          | Description              |
-|---------------|------------------|--------------------------|
-| `DB_USER`     | `finance`        | PostgreSQL username       |
-| `DB_PASSWORD` | *(required)*     | PostgreSQL password       |
-| `DB_NAME`     | `financetracker` | PostgreSQL database name  |
-| `PORT`        | `8080`           | Exposed host port         |
+| Variable       | Default                       | Description                         |
+|----------------|-------------------------------|-------------------------------------|
+| `DATABASE_URL` | `file:/app/data/finance.db`   | SQLite file path (inside container) |
+| `PORT`         | `8080`                        | Exposed host port                   |

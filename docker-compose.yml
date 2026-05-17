@@ -1,24 +1,6 @@
 version: "3.9"
 
 services:
-  postgres:
-    image: postgres:16-alpine
-    container_name: finance-db
-    restart: unless-stopped
-    environment:
-      POSTGRES_USER: ${DB_USER:-finance}
-      POSTGRES_PASSWORD: ${DB_PASSWORD:-finance_secret}
-      POSTGRES_DB: ${DB_NAME:-financetracker}
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-finance}"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-    networks:
-      - finance-net
-
   backend:
     build:
       context: ./backend
@@ -26,15 +8,13 @@ services:
     container_name: finance-backend
     restart: unless-stopped
     environment:
-      DATABASE_URL: postgresql://${DB_USER:-finance}:${DB_PASSWORD:-finance_secret}@postgres:5432/${DB_NAME:-financetracker}
+      DATABASE_URL: file:/app/data/finance.db
       PORT: 3001
       NODE_ENV: production
-    depends_on:
-      postgres:
-        condition: service_healthy
     networks:
       - finance-net
     volumes:
+      - db_data:/app/data
       - uploads_data:/app/uploads
 
   frontend:
@@ -65,7 +45,7 @@ services:
       - "traefik.enable=true"
 
 volumes:
-  postgres_data:
+  db_data:
   uploads_data:
 
 networks:
