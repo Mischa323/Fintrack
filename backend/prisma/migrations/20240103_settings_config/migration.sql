@@ -1,0 +1,4 @@
+ALTER TABLE "Settings" ADD COLUMN "jwtSecret" TEXT;
+ALTER TABLE "Settings" ADD COLUMN "appPort" INTEGER;
+ALTER TABLE "Settings" ADD COLUMN "defaultCurrency" TEXT NOT NULL DEFAULT 'EUR';
+ALTER TABLE "Settings" ADD COLUMN "appName" TEXT NOT NULL DEFAULT 'FinTrack';

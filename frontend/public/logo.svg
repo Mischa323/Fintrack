@@ -1,0 +1,62 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 272 66" fill="none">
+  <defs>
+    <!-- Fin: deep indigo at base → light violet at tip -->
+    <linearGradient id="finGrad" x1="30%" y1="100%" x2="70%" y2="0%">
+      <stop offset="0%"   stop-color="#312e81"/>
+      <stop offset="35%"  stop-color="#6366f1"/>
+      <stop offset="70%"  stop-color="#8b5cf6"/>
+      <stop offset="100%" stop-color="#c4b5fd"/>
+    </linearGradient>
+
+    <!-- Wordmark: shimmer from bright indigo → soft violet -->
+    <linearGradient id="textGrad" x1="0%" y1="0%" x2="100%" y2="15%">
+      <stop offset="0%"   stop-color="#818cf8"/>
+      <stop offset="50%"  stop-color="#a78bfa"/>
+      <stop offset="100%" stop-color="#c4b5fd"/>
+    </linearGradient>
+
+    <!-- Mini fin (i-dot) -->
+    <linearGradient id="miniGrad" x1="20%" y1="100%" x2="80%" y2="0%">
+      <stop offset="0%"   stop-color="#6366f1"/>
+      <stop offset="100%" stop-color="#a78bfa"/>
+    </linearGradient>
+  </defs>
+
+  <!-- ═══ DORSAL FIN ICON ═══ -->
+
+  <!-- Water ripple -->
+  <path d="M 4,57 Q 16,53 28,57 Q 40,61 52,57"
+        stroke="#818cf8" stroke-opacity="0.4" stroke-width="1.5"
+        stroke-linecap="round"/>
+
+  <!-- Fin body — gradual front curve, concave back edge like a real dorsal fin -->
+  <path d="M 5,57
+           C 2,43 4,22 22,8
+           C 26,4 31,4 34,8
+           C 37,14 40,36 47,54
+           L 51,57
+           Q 28,63 5,57 Z"
+        fill="url(#finGrad)"
+        stroke="rgba(167,139,250,0.3)" stroke-width="0.75"/>
+
+  <!-- Glass specular highlight along leading edge -->
+  <path d="M 22,8 C 26,4 31,4 34,8 C 36,13 38,32 43,52 Q 34,55 26,54 Z"
+        fill="white" fill-opacity="0.13"/>
+
+  <!-- ═══ WORDMARK ═══ -->
+
+  <!-- &#305; = dotless ı so we can draw our own fin as the dot -->
+  <text x="62" y="54"
+        font-family="'Arial Black','Helvetica Neue',Arial,sans-serif"
+        font-size="46" font-weight="900" letter-spacing="-0.5"
+        fill="url(#textGrad)">F&#305;nTrack</text>
+
+  <!-- Mini shark fin as the dot of the ı -->
+  <!-- F advance ≈ 29 px → ı centre ≈ x 97; dot sits around y 20 -->
+  <path d="M 88,24
+           C 85,17 87,9 94,6
+           C 97,4 100,5 102,8
+           C 103,12 104,19 105,23
+           Q 96,26 88,24 Z"
+        fill="url(#miniGrad)"/>
+</svg>

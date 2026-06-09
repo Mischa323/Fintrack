@@ -6,9 +6,77 @@
   font-family: "Inter", system-ui, sans-serif;
 }
 
+/* ── Theme variables ──────────────────────────────────────────── */
+:root {
+  --c1: 99, 102, 241;
+  --c2: 139, 92, 246;
+  --c3: 16, 185, 129;
+  --c4: 59, 130, 246;
+  --base: #0a0a1a;
+  --base-dark: #0d0d2b;
+  --c1-full: #6366f1;
+  --c2-full: #8b5cf6;
+}
+
+[data-theme="ocean"] {
+  --c1: 6, 182, 212;
+  --c2: 14, 165, 233;
+  --c3: 20, 184, 166;
+  --c4: 99, 102, 241;
+  --base: #020f1a;
+  --base-dark: #041520;
+  --c1-full: #06b6d4;
+  --c2-full: #0ea5e9;
+}
+
+[data-theme="emerald"] {
+  --c1: 16, 185, 129;
+  --c2: 52, 211, 153;
+  --c3: 6, 182, 212;
+  --c4: 99, 102, 241;
+  --base: #011a0d;
+  --base-dark: #021f10;
+  --c1-full: #10b981;
+  --c2-full: #34d399;
+}
+
+[data-theme="rose"] {
+  --c1: 244, 63, 94;
+  --c2: 251, 113, 133;
+  --c3: 249, 115, 22;
+  --c4: 139, 92, 246;
+  --base: #1a0208;
+  --base-dark: #20030a;
+  --c1-full: #f43f5e;
+  --c2-full: #fb7185;
+}
+
+[data-theme="sunset"] {
+  --c1: 249, 115, 22;
+  --c2: 245, 158, 11;
+  --c3: 239, 68, 68;
+  --c4: 139, 92, 246;
+  --base: #1a0e02;
+  --base-dark: #201202;
+  --c1-full: #f97316;
+  --c2-full: #f59e0b;
+}
+
+[data-theme="midnight"] {
+  --c1: 30, 64, 175;
+  --c2: 67, 56, 202;
+  --c3: 37, 99, 235;
+  --c4: 99, 102, 241;
+  --base: #020409;
+  --base-dark: #03050c;
+  --c1-full: #1e40af;
+  --c2-full: #4338ca;
+}
+
+/* ── Base ──────────────────────────────────────────────────────── */
 body {
   margin: 0;
-  background: #0a0a1a;
+  background: var(--base);
   color: #e2e8f0;
   min-height: 100vh;
 }
@@ -17,11 +85,11 @@ body {
 #root {
   min-height: 100vh;
   background:
-    radial-gradient(ellipse at 20% 20%, rgba(99, 102, 241, 0.25) 0%, transparent 60%),
-    radial-gradient(ellipse at 80% 10%, rgba(139, 92, 246, 0.2) 0%, transparent 50%),
-    radial-gradient(ellipse at 60% 80%, rgba(16, 185, 129, 0.15) 0%, transparent 50%),
-    radial-gradient(ellipse at 10% 80%, rgba(59, 130, 246, 0.15) 0%, transparent 50%),
-    #0a0a1a;
+    radial-gradient(ellipse at 20% 20%, rgba(var(--c1), 0.25) 0%, transparent 60%),
+    radial-gradient(ellipse at 80% 10%, rgba(var(--c2), 0.2) 0%, transparent 50%),
+    radial-gradient(ellipse at 60% 80%, rgba(var(--c3), 0.15) 0%, transparent 50%),
+    radial-gradient(ellipse at 10% 80%, rgba(var(--c4), 0.15) 0%, transparent 50%),
+    var(--base);
 }
 
 /* Liquid glass card */
@@ -69,12 +137,13 @@ body {
 
 .glass-input:focus {
   outline: none;
-  border-color: rgba(99, 102, 241, 0.6);
-  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.15);
+  border-color: rgba(var(--c1), 0.6);
+  box-shadow: 0 0 0 3px rgba(var(--c1), 0.15);
 }
 
-.glass-input option {
-  background: #1e1e3a;
+.glass-input option,
+select option {
+  background: var(--base-dark, #0d0d2b);
   color: #e2e8f0;
 }
 
@@ -88,15 +157,15 @@ body {
 }
 
 .glass-btn-primary {
-  background: linear-gradient(135deg, rgba(99, 102, 241, 0.8), rgba(139, 92, 246, 0.8));
-  border: 1px solid rgba(139, 92, 246, 0.5);
+  background: linear-gradient(135deg, rgba(var(--c1), 0.8), rgba(var(--c2), 0.8));
+  border: 1px solid rgba(var(--c2), 0.5);
   color: white;
-  box-shadow: 0 4px 15px rgba(99, 102, 241, 0.3);
+  box-shadow: 0 4px 15px rgba(var(--c1), 0.3);
 }
 
 .glass-btn-primary:hover {
-  background: linear-gradient(135deg, rgba(99, 102, 241, 0.95), rgba(139, 92, 246, 0.95));
-  box-shadow: 0 6px 20px rgba(99, 102, 241, 0.5);
+  background: linear-gradient(135deg, rgba(var(--c1), 0.95), rgba(var(--c2), 0.95));
+  box-shadow: 0 6px 20px rgba(var(--c1), 0.5);
   transform: translateY(-1px);
 }
 
@@ -143,8 +212,8 @@ body {
 }
 
 .nav-item.active {
-  background: linear-gradient(135deg, rgba(99, 102, 241, 0.3), rgba(139, 92, 246, 0.2));
-  border: 1px solid rgba(99, 102, 241, 0.3);
+  background: linear-gradient(135deg, rgba(var(--c1), 0.3), rgba(var(--c2), 0.2));
+  border: 1px solid rgba(var(--c1), 0.3);
   color: white;
 }
 

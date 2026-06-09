@@ -12,18 +12,18 @@ router.get("/", async (req, res) => {
 });
 
 router.post("/", async (req, res) => {
-  const { name, type, currency, balance, color, icon, institution } = req.body;
+  const { name, type, currency, balance, color, icon, institution, iban } = req.body;
   const account = await prisma.account.create({
-    data: { name, type, currency: currency || "EUR", balance: balance || 0, color, icon, institution },
+    data: { name, type, currency: currency || "EUR", balance: balance || 0, color, icon, institution, iban: iban || null },
   });
   res.status(201).json(account);
 });
 
 router.put("/:id", async (req, res) => {
-  const { name, type, currency, color, icon, institution } = req.body;
+  const { name, type, currency, color, icon, institution, iban } = req.body;
   const account = await prisma.account.update({
     where: { id: req.params.id },
-    data: { name, type, currency, color, icon, institution },
+    data: { name, type, currency, color, icon, institution, iban: iban || null },
   });
   res.json(account);
 });

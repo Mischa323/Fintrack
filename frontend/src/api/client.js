@@ -4,6 +4,25 @@ const api = axios.create({
   baseURL: import.meta.env.VITE_API_URL || "/api",
 });
 
+// Attach token to every request
+api.interceptors.request.use((config) => {
+  const token = localStorage.getItem("fintrack_token");
+  if (token) config.headers.Authorization = `Bearer ${token}`;
+  return config;
+});
+
+// On 401, clear token and redirect to login
+api.interceptors.response.use(
+  (r) => r,
+  (err) => {
+    if (err.response?.status === 401 && !err.config.url.includes("/auth/")) {
+      localStorage.removeItem("fintrack_token");
+      window.location.href = "/login";
+    }
+    return Promise.reject(err);
+  }
+);
+
 export const accounts = {
   list: () => api.get("/accounts").then((r) => r.data),
   create: (data) => api.post("/accounts", data).then((r) => r.data),
@@ -24,6 +43,7 @@ export const categories = {
   create: (data) => api.post("/categories", data).then((r) => r.data),
   update: (id, data) => api.put(`/categories/${id}`, data).then((r) => r.data),
   remove: (id) => api.delete(`/categories/${id}`),
+  seed: () => api.post("/categories/seed").then((r) => r.data),
 };
 
 export const recurring = {
@@ -51,6 +71,56 @@ export const importApi = {
     form.append("file", file);
     return api.post("/import/generic", form).then((r) => r.data);
   },
+  clear: (accountId, source) =>
+    api.delete("/import/clear", { params: { accountId, source } }).then((r) => r.data),
+  maybeAccounts: (file) => {
+    const form = new FormData();
+    form.append("file", file);
+    return api.post("/import/maybe-accounts", form).then((r) => r.data);
+  },
+};
+
+export const goals = {
+  list: () => api.get("/goals").then((r) => r.data),
+  create: (data) => api.post("/goals", data).then((r) => r.data),
+  update: (id, data) => api.put(`/goals/${id}`, data).then((r) => r.data),
+  remove: (id) => api.delete(`/goals/${id}`),
+};
+
+export const backup = {
+  list: () => api.get("/backup").then((r) => r.data),
+  create: (data) => api.post("/backup", data).then((r) => r.data),
+  update: (id, data) => api.put(`/backup/${id}`, data).then((r) => r.data),
+  remove: (id) => api.delete(`/backup/${id}`),
+  run: () => api.post("/backup/run").then((r) => r.data),
+  downloadUrl: () => `${api.defaults.baseURL}/backup/download`,
+  restore: (file) => {
+    const form = new FormData();
+    form.append("file", file);
+    return api.post("/backup/restore", form).then((r) => r.data);
+  },
+};
+
+export const users = {
+  list: () => api.get("/users").then((r) => r.data),
+  create: (data) => api.post("/users", data).then((r) => r.data),
+  update: (id, data) => api.put(`/users/${id}`, data).then((r) => r.data),
+  remove: (id) => api.delete(`/users/${id}`),
+};
+
+export const config = {
+  get: () => api.get("/config").then((r) => r.data),
+  update: (data) => api.put("/config", data).then((r) => r.data),
+};
+
+export const auth = {
+  status: () => api.get("/auth/status").then((r) => r.data),
+  setup: (password) => api.post("/auth/setup", { password }).then((r) => r.data),
+  login: (password, totpCode) => api.post("/auth/login", { password, totpCode }).then((r) => r.data),
+  changePassword: (currentPassword, newPassword) => api.post("/auth/change-password", { currentPassword, newPassword }).then((r) => r.data),
+  generate2FA: () => api.post("/auth/2fa/generate").then((r) => r.data),
+  enable2FA: (totpCode) => api.post("/auth/2fa/enable", { totpCode }).then((r) => r.data),
+  disable2FA: (password) => api.post("/auth/2fa/disable", { password }).then((r) => r.data),
 };
 
 export default api;

@@ -10,16 +10,33 @@ datasource db {
 model Account {
   id           String                 @id @default(cuid())
   name         String
-  type         AccountType
+  type         String
   currency     String                 @default("EUR")
   balance      Decimal                @default(0)
   color        String                 @default("#6366f1")
   icon         String?
   institution  String?
+  iban         String?
   createdAt    DateTime               @default(now())
   updatedAt    DateTime               @updatedAt
-  transactions Transaction[]
-  recurring    RecurringTransaction[]
+  transactions   Transaction[]          @relation("FromAccount")
+  toTransactions Transaction[]          @relation("ToAccount")
+  recurring      RecurringTransaction[]
+  goals          Goal[]
+}
+
+model Goal {
+  id           String    @id @default(cuid())
+  name         String
+  description  String?
+  targetAmount Decimal
+  savedAmount  Decimal   @default(0)
+  accountId    String?
+  account      Account?  @relation(fields: [accountId], references: [id], onDelete: SetNull)
+  targetDate   DateTime?
+  color        String    @default("#6366f1")
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
 }
 
 model Category {
@@ -38,13 +55,15 @@ model Category {
 model Transaction {
   id           String                @id @default(cuid())
   accountId    String
-  account      Account               @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  account      Account               @relation("FromAccount", fields: [accountId], references: [id], onDelete: Cascade)
+  toAccountId  String?
+  toAccount    Account?              @relation("ToAccount", fields: [toAccountId], references: [id])
   categoryId   String?
   category     Category?             @relation(fields: [categoryId], references: [id])
   amount       Decimal
   description  String
   date         DateTime
-  type         TransactionType
+  type         String
   notes        String?
   recurringId  String?
   recurring    RecurringTransaction? @relation(fields: [recurringId], references: [id])
@@ -56,45 +75,68 @@ model Transaction {
   @@unique([externalId, accountId])
 }
 
+model User {
+  id                 String   @id @default(cuid())
+  username           String   @unique
+  passwordHash       String?
+  email              String?  @unique
+  oidcSubject        String?  @unique
+  googleOidcSubject  String?  @unique
+  role               String   @default("user")
+  twoFactorSecret    String?
+  twoFactorEnabled   Boolean  @default(false)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+}
+
+model Settings {
+  id                 String   @id @default("singleton")
+  passwordHash       String?
+  twoFactorSecret    String?
+  twoFactorEnabled   Boolean  @default(false)
+  jwtSecret          String?
+  appPort            Int?
+  defaultCurrency    String   @default("EUR")
+  appName            String   @default("FinTrack")
+  oidcEnabled        Boolean  @default(false)
+  oidcTenantId       String?
+  oidcClientId       String?
+  oidcClientSecret   String?
+  googleOidcEnabled  Boolean  @default(false)
+  googleClientId     String?
+  googleClientSecret String?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+}
+
+model BackupConfig {
+  id         String    @id @default(cuid())
+  label      String
+  type       String
+  enabled    Boolean   @default(true)
+  configJson String    @default("{}")
+  schedule   String    @default("0 2 * * *")
+  lastRunAt  DateTime?
+  lastStatus String?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+}
+
 model RecurringTransaction {
-  id           String          @id @default(cuid())
+  id           String        @id @default(cuid())
   accountId    String
-  account      Account         @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  account      Account       @relation(fields: [accountId], references: [id], onDelete: Cascade)
   categoryId   String?
-  category     Category?       @relation(fields: [categoryId], references: [id])
-  amount       Decimal         @db.Decimal(15, 2)
+  category     Category?     @relation(fields: [categoryId], references: [id])
+  amount       Decimal
   description  String
-  type         TransactionType
-  frequency    Frequency
+  type         String
+  frequency    String
   startDate    DateTime
   endDate      DateTime?
   nextDate     DateTime
-  active       Boolean         @default(true)
+  active       Boolean       @default(true)
   transactions Transaction[]
-  createdAt    DateTime        @default(now())
-  updatedAt    DateTime        @updatedAt
-}
-
-enum AccountType {
-  CHECKING
-  SAVINGS
-  CREDIT_CARD
-  INVESTMENT
-  CASH
-  OTHER
-}
-
-enum TransactionType {
-  INCOME
-  EXPENSE
-  TRANSFER
-}
-
-enum Frequency {
-  DAILY
-  WEEKLY
-  BIWEEKLY
-  MONTHLY
-  QUARTERLY
-  YEARLY
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
 }

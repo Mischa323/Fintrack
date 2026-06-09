@@ -1,27 +1,364 @@
 import { useState, useEffect, useRef } from "react";
-import { importApi, accounts as accountsApi } from "../api/client";
+import { importApi, backup as backupApi, accounts as accountsApi } from "../api/client";
 import GlassCard from "../components/GlassCard";
 
-export default function Import() {
+const STEPS_MAYBE = ["Source", "Accounts", "Transactions"];
+const STEPS_FINTRACK = ["Source", "Restore"];
+
+function StepIndicator({ steps, current }) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 0, marginBottom: 32 }}>
+      {steps.map((label, i) => {
+        const done = i < current;
+        const active = i === current;
+        return (
+          <div key={label} style={{ display: "flex", alignItems: "center", flex: i < steps.length - 1 ? 1 : undefined }}>
+            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 6 }}>
+              <div style={{
+                width: 32, height: 32, borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center",
+                fontSize: 13, fontWeight: 700,
+                background: done ? "#34d399" : active ? "#818cf8" : "rgba(255,255,255,0.08)",
+                color: done || active ? "#0f172a" : "rgba(255,255,255,0.35)",
+                border: active ? "2px solid #818cf8" : "none",
+                transition: "all 0.2s",
+              }}>
+                {done ? "✓" : i + 1}
+              </div>
+              <div style={{ fontSize: 11, color: active ? "#c7d2fe" : done ? "#6ee7b7" : "rgba(255,255,255,0.3)", whiteSpace: "nowrap" }}>
+                {label}
+              </div>
+            </div>
+            {i < steps.length - 1 && (
+              <div style={{ flex: 1, height: 2, background: done ? "#34d399" : "rgba(255,255,255,0.08)", marginBottom: 18, transition: "background 0.3s" }} />
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function FileDropzone({ fileRef, file, onFile, accept = ".csv", label = "Drop your file here" }) {
+  return (
+    <div>
+      <div
+        onClick={() => fileRef.current.click()}
+        onDragOver={(e) => e.preventDefault()}
+        onDrop={(e) => { e.preventDefault(); const f = e.dataTransfer.files[0]; if (f) onFile(f); }}
+        style={{
+          border: `2px dashed ${file ? "rgba(129,140,248,0.5)" : "rgba(255,255,255,0.15)"}`,
+          borderRadius: 14, padding: "28px 20px", textAlign: "center", cursor: "pointer",
+          background: file ? "rgba(99,102,241,0.07)" : undefined,
+          transition: "all 0.2s",
+        }}
+      >
+        {file ? (
+          <div>
+            <div style={{ fontSize: 28, marginBottom: 6 }}>📄</div>
+            <div style={{ fontWeight: 600, fontSize: 14 }}>{file.name}</div>
+            <div style={{ fontSize: 12, color: "rgba(255,255,255,0.4)", marginTop: 2 }}>{(file.size / 1024).toFixed(1)} KB — click to change</div>
+          </div>
+        ) : (
+          <div>
+            <div style={{ fontSize: 28, marginBottom: 6 }}>⇪</div>
+            <div style={{ fontWeight: 500 }}>{label}</div>
+            <div style={{ fontSize: 13, color: "rgba(255,255,255,0.4)", marginTop: 4 }}>or click to browse</div>
+          </div>
+        )}
+      </div>
+      <input ref={fileRef} type="file" accept={accept} style={{ display: "none" }} onChange={(e) => onFile(e.target.files[0])} />
+    </div>
+  );
+}
+
+function ResultBanner({ result, onDismiss }) {
+  if (!result) return null;
+  const isError = result.error;
+  return (
+    <div style={{
+      borderRadius: 12, padding: "14px 18px", fontSize: 14,
+      background: isError ? "rgba(239,68,68,0.12)" : "rgba(52,211,153,0.12)",
+      border: `1px solid ${isError ? "rgba(239,68,68,0.3)" : "rgba(52,211,153,0.3)"}`,
+      display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12,
+    }}>
+      <div style={{ color: isError ? "#f87171" : "#34d399" }}>{result.message}</div>
+      {onDismiss && <button onClick={onDismiss} style={{ background: "none", border: "none", color: "rgba(255,255,255,0.3)", cursor: "pointer", padding: 0, fontSize: 16 }}>×</button>}
+    </div>
+  );
+}
+
+// ── Step 1: choose source ────────────────────────────────────────────────────
+function StepSource({ onChoose }) {
   const [accounts, setAccounts] = useState([]);
   const [accountId, setAccountId] = useState("");
-  const [mode, setMode] = useState("maybe");
+  const [clearing, setClearing] = useState(false);
+  const [clearResult, setClearResult] = useState(null);
+  const [showClear, setShowClear] = useState(false);
+
+  useEffect(() => {
+    accountsApi.list().then((a) => { setAccounts(a); if (a[0]) setAccountId(a[0].id); });
+  }, []);
+
+  const handleClear = async () => {
+    if (!accountId) return;
+    if (!window.confirm("Delete all imported transactions for this account?")) return;
+    setClearing(true);
+    setClearResult(null);
+    try {
+      const res = await importApi.clear(accountId, "maybe");
+      setClearResult(`✓ ${res.deleted} imported transactions removed`);
+    } catch (e) {
+      setClearResult("Error: " + (e.response?.data?.error || e.message));
+    } finally {
+      setClearing(false);
+    }
+  };
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+      <div style={{ fontSize: 15, color: "rgba(255,255,255,0.55)" }}>Choose where you want to import data from.</div>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+        {[
+          {
+            id: "maybe",
+            icon: "◈",
+            title: "Maybe Finance",
+            desc: "Import from a Maybe Finance export ZIP. Brings in your accounts, balances and full transaction history.",
+            badge: "CSV",
+          },
+          {
+            id: "fintrack",
+            icon: "🗄",
+            title: "FinTrack Backup",
+            desc: "Restore a full database backup made by FinTrack. Replaces all current data with the backup.",
+            badge: ".db",
+            warn: true,
+          },
+        ].map((s) => (
+          <GlassCard
+            key={s.id}
+            onClick={() => onChoose(s.id)}
+            style={{ cursor: "pointer", transition: "border-color 0.15s" }}
+          >
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }}>
+              <div style={{ fontSize: 28 }}>{s.icon}</div>
+              <span style={{
+                fontSize: 11, padding: "2px 8px", borderRadius: 20, fontWeight: 600,
+                background: s.warn ? "rgba(248,113,113,0.15)" : "rgba(99,102,241,0.2)",
+                color: s.warn ? "#f87171" : "#818cf8",
+              }}>{s.badge}</span>
+            </div>
+            <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 6 }}>{s.title}</div>
+            <div style={{ fontSize: 13, color: "rgba(255,255,255,0.45)", lineHeight: 1.6 }}>{s.desc}</div>
+          </GlassCard>
+        ))}
+      </div>
+
+      {/* Clear imported data */}
+      <div style={{ borderTop: "1px solid rgba(255,255,255,0.07)", paddingTop: 16 }}>
+        <button
+          onClick={() => { setShowClear((v) => !v); setClearResult(null); }}
+          style={{ background: "none", border: "none", color: "rgba(248,113,113,0.7)", fontSize: 13, cursor: "pointer", padding: 0, display: "flex", alignItems: "center", gap: 6 }}
+        >
+          <span style={{ fontSize: 16 }}>⚠</span> Clear imported data {showClear ? "▲" : "▼"}
+        </button>
+        {showClear && (
+          <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 10 }}>
+            <div style={{ fontSize: 13, color: "rgba(255,255,255,0.4)" }}>
+              Deletes all imported transactions for the selected account. Does not affect manually entered transactions.
+            </div>
+            <div style={{ display: "flex", gap: 10 }}>
+              <select
+                className="glass-input"
+                style={{ flex: 1, padding: "9px 12px" }}
+                value={accountId}
+                onChange={(e) => setAccountId(e.target.value)}
+              >
+                {accounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+              </select>
+              <button
+                className="glass-btn"
+                style={{ padding: "9px 16px", color: "#f87171", borderColor: "rgba(248,113,113,0.3)", opacity: (!accountId || clearing) ? 0.5 : 1 }}
+                onClick={handleClear}
+                disabled={!accountId || clearing}
+              >
+                {clearing ? "Clearing…" : "Clear Import"}
+              </button>
+            </div>
+            {clearResult && (
+              <div style={{ fontSize: 13, color: clearResult.startsWith("Error") ? "#f87171" : "#34d399" }}>{clearResult}</div>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── Maybe step 2: accounts.csv ───────────────────────────────────────────────
+function StepMaybeAccounts({ onDone, onBack }) {
   const [file, setFile] = useState(null);
-  const [result, setResult] = useState(null);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(null);
+  const [result, setResult] = useState(null);
   const fileRef = useRef();
 
-  useEffect(() => { accountsApi.list().then((a) => { setAccounts(a); if (a[0]) setAccountId(a[0].id); }); }, []);
+  const handle = async () => {
+    if (!file) return;
+    setLoading(true);
+    setResult(null);
+    try {
+      const res = await importApi.maybeAccounts(file);
+      const names = res.accounts.map((a) => `${a.name} (€${Number(a.balance).toFixed(2)})`).join(", ");
+      setResult({ message: `✓ ${res.accounts.length} account${res.accounts.length !== 1 ? "s" : ""} synced: ${names}` });
+    } catch (e) {
+      setResult({ error: true, message: e.response?.data?.error || e.message });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+      <div>
+        <div style={{ fontWeight: 700, fontSize: 17, marginBottom: 6 }}>Import accounts.csv</div>
+        <div style={{ fontSize: 14, color: "rgba(255,255,255,0.5)", lineHeight: 1.7 }}>
+          Upload the <code>accounts.csv</code> from your Maybe Finance export ZIP. This creates your accounts in FinTrack and sets their correct current balances.
+        </div>
+      </div>
+
+      <FileDropzone fileRef={fileRef} file={file} onFile={setFile} label="Drop accounts.csv here" />
+      <ResultBanner result={result} onDismiss={() => setResult(null)} />
+
+      <div style={{ display: "flex", gap: 10 }}>
+        <button className="glass-btn" style={{ padding: "11px 20px" }} onClick={onBack}>← Back</button>
+        <button
+          className="glass-btn glass-btn-primary"
+          style={{ flex: 1, padding: "11px 20px", opacity: (!file || loading) ? 0.5 : 1 }}
+          onClick={handle}
+          disabled={!file || loading}
+        >
+          {loading ? "Importing…" : "Import Accounts"}
+        </button>
+        <button
+          className="glass-btn"
+          style={{ padding: "11px 20px", opacity: !result || result.error ? 0.5 : 1 }}
+          onClick={onDone}
+          disabled={!result || result.error}
+        >
+          Next →
+        </button>
+      </div>
+      {!result && (
+        <button onClick={onDone} style={{ background: "none", border: "none", color: "rgba(255,255,255,0.3)", fontSize: 13, cursor: "pointer", padding: 0, textAlign: "left" }}>
+          Skip this step (accounts already set up)
+        </button>
+      )}
+    </div>
+  );
+}
+
+// ── Maybe step 3: transactions.csv ───────────────────────────────────────────
+function StepMaybeTransactions({ onBack }) {
+  const [accounts, setAccounts] = useState([]);
+  const [accountId, setAccountId] = useState("");
+  const [file, setFile] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [clearing, setClearing] = useState(false);
+  const [result, setResult] = useState(null);
+  const fileRef = useRef();
+
+  useEffect(() => {
+    accountsApi.list().then((a) => { setAccounts(a); if (a[0]) setAccountId(a[0].id); });
+  }, []);
 
   const handleImport = async () => {
     if (!file || !accountId) return;
     setLoading(true);
-    setError(null);
     setResult(null);
     try {
-      const res = mode === "maybe" ? await importApi.maybe(accountId, file) : await importApi.generic(accountId, file);
-      setResult(res);
+      const res = await importApi.maybe(accountId, file);
+      setResult({ message: `✓ ${res.imported} transactions imported${res.skipped ? `, ${res.skipped} skipped` : ""}` });
+    } catch (e) {
+      setResult({ error: true, message: e.response?.data?.error || e.message });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleClear = async () => {
+    if (!accountId) return;
+    if (!window.confirm("Delete all Maybe Finance imported transactions for this account?")) return;
+    setClearing(true);
+    setResult(null);
+    try {
+      const res = await importApi.clear(accountId, "maybe");
+      setResult({ message: `✓ ${res.deleted} imported transactions cleared from this account` });
+    } catch (e) {
+      setResult({ error: true, message: e.response?.data?.error || e.message });
+    } finally {
+      setClearing(false);
+    }
+  };
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+      <div>
+        <div style={{ fontWeight: 700, fontSize: 17, marginBottom: 6 }}>Import transactions.csv</div>
+        <div style={{ fontSize: 14, color: "rgba(255,255,255,0.5)", lineHeight: 1.7 }}>
+          Upload the <code>transactions.csv</code> from your Maybe Finance export ZIP. Select which account to assign the transactions to.
+        </div>
+      </div>
+
+      <div>
+        <div style={{ fontSize: 13, color: "rgba(255,255,255,0.5)", marginBottom: 6 }}>Target Account</div>
+        <select className="glass-input" style={{ padding: "10px 14px", width: "100%" }} value={accountId} onChange={(e) => setAccountId(e.target.value)}>
+          {accounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+        </select>
+      </div>
+
+      <FileDropzone fileRef={fileRef} file={file} onFile={setFile} label="Drop transactions.csv here" />
+      <ResultBanner result={result} onDismiss={() => setResult(null)} />
+
+      <div style={{ display: "flex", gap: 10 }}>
+        <button className="glass-btn" style={{ padding: "11px 20px" }} onClick={onBack}>← Back</button>
+        <button
+          className="glass-btn glass-btn-primary"
+          style={{ flex: 1, padding: "11px 20px", opacity: (!file || !accountId || loading) ? 0.5 : 1 }}
+          onClick={handleImport}
+          disabled={!file || !accountId || loading}
+        >
+          {loading ? "Importing…" : "Import Transactions"}
+        </button>
+        <button
+          className="glass-btn"
+          style={{ padding: "11px 20px", opacity: (!accountId || clearing) ? 0.5 : 1, color: "#f87171", borderColor: "rgba(248,113,113,0.25)" }}
+          onClick={handleClear}
+          disabled={!accountId || clearing}
+          title="Remove all previously imported Maybe Finance transactions for this account"
+        >
+          {clearing ? "Clearing…" : "Clear"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ── FinTrack backup restore ──────────────────────────────────────────────────
+function StepRestore({ onBack }) {
+  const [file, setFile] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [done, setDone] = useState(false);
+  const [error, setError] = useState(null);
+  const fileRef = useRef();
+
+  const handleRestore = async () => {
+    if (!file) return;
+    if (!window.confirm("This will replace ALL current data with the backup. This cannot be undone. Continue?")) return;
+    setLoading(true);
+    setError(null);
+    try {
+      await backupApi.restore(file);
+      setDone(true);
     } catch (e) {
       setError(e.response?.data?.error || e.message);
     } finally {
@@ -29,126 +366,93 @@ export default function Import() {
     }
   };
 
+  if (done) {
+    return (
+      <div style={{ display: "flex", flexDirection: "column", gap: 20, textAlign: "center", padding: "20px 0" }}>
+        <div style={{ fontSize: 48 }}>✓</div>
+        <div style={{ fontWeight: 700, fontSize: 18, color: "#34d399" }}>Database restored</div>
+        <div style={{ fontSize: 14, color: "rgba(255,255,255,0.5)" }}>Your data has been restored from the backup. Reload the page to see your data.</div>
+        <button className="glass-btn glass-btn-primary" style={{ padding: "12px 24px" }} onClick={() => window.location.reload()}>
+          Reload Page
+        </button>
+      </div>
+    );
+  }
+
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 24, maxWidth: 680 }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
       <div>
-        <h1 style={{ fontSize: 26, fontWeight: 700, margin: 0 }}>Import Data</h1>
-        <p style={{ color: "rgba(255,255,255,0.45)", margin: "4px 0 0", fontSize: 14 }}>Import from Maybe Finance or generic bank CSV</p>
-      </div>
-
-      {/* Format info */}
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
-        {[
-          {
-            id: "maybe",
-            title: "Maybe Finance",
-            icon: "◈",
-            desc: "Import from a Maybe Finance CSV export. Supports automatic category mapping, deduplication, and external IDs.",
-            fields: "date, name, amount, currency, category, account, notes, id",
-          },
-          {
-            id: "generic",
-            title: "Generic Bank CSV",
-            icon: "🏦",
-            desc: "Import from a generic bank export. Auto-detects common column names in English and Dutch.",
-            fields: "date/datum, amount/bedrag, description/omschrijving, category/categorie",
-          },
-        ].map((m) => (
-          <GlassCard
-            key={m.id}
-            onClick={() => setMode(m.id)}
-            style={{ cursor: "pointer", borderColor: mode === m.id ? "rgba(99,102,241,0.6)" : undefined, background: mode === m.id ? "rgba(99,102,241,0.1)" : undefined }}
-          >
-            <div style={{ fontSize: 24, marginBottom: 8 }}>{m.icon}</div>
-            <div style={{ fontWeight: 600, marginBottom: 4 }}>{m.title}</div>
-            <div style={{ fontSize: 13, color: "rgba(255,255,255,0.45)", marginBottom: 10 }}>{m.desc}</div>
-            <div style={{ fontSize: 11, background: "rgba(255,255,255,0.05)", padding: "6px 10px", borderRadius: 8, color: "rgba(255,255,255,0.35)", fontFamily: "monospace" }}>
-              {m.fields}
-            </div>
-          </GlassCard>
-        ))}
-      </div>
-
-      <GlassCard>
-        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-          <div>
-            <div style={{ fontSize: 13, color: "rgba(255,255,255,0.5)", marginBottom: 6 }}>Target Account</div>
-            <select className="glass-input" style={{ padding: "10px 14px", width: "100%" }} value={accountId} onChange={(e) => setAccountId(e.target.value)}>
-              {accounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
-            </select>
-          </div>
-
-          <div>
-            <div style={{ fontSize: 13, color: "rgba(255,255,255,0.5)", marginBottom: 6 }}>CSV File</div>
-            <div
-              onClick={() => fileRef.current.click()}
-              style={{
-                border: "2px dashed rgba(255,255,255,0.15)", borderRadius: 14, padding: "32px 20px",
-                textAlign: "center", cursor: "pointer", transition: "border-color 0.2s",
-              }}
-              onDragOver={(e) => { e.preventDefault(); }}
-              onDrop={(e) => { e.preventDefault(); const f = e.dataTransfer.files[0]; if (f) setFile(f); }}
-            >
-              {file ? (
-                <div>
-                  <div style={{ fontSize: 32, marginBottom: 8 }}>📄</div>
-                  <div style={{ fontWeight: 500 }}>{file.name}</div>
-                  <div style={{ fontSize: 12, color: "rgba(255,255,255,0.4)" }}>{(file.size / 1024).toFixed(1)} KB</div>
-                </div>
-              ) : (
-                <div>
-                  <div style={{ fontSize: 32, marginBottom: 8 }}>⇪</div>
-                  <div style={{ fontWeight: 500 }}>Drop your CSV here</div>
-                  <div style={{ fontSize: 13, color: "rgba(255,255,255,0.4)", marginTop: 4 }}>or click to browse</div>
-                </div>
-              )}
-            </div>
-            <input ref={fileRef} type="file" accept=".csv" style={{ display: "none" }} onChange={(e) => setFile(e.target.files[0])} />
-          </div>
-
-          <button
-            className="glass-btn glass-btn-primary"
-            style={{ padding: "12px 24px", opacity: (!file || !accountId || loading) ? 0.5 : 1 }}
-            onClick={handleImport}
-            disabled={!file || !accountId || loading}
-          >
-            {loading ? "Importing…" : `Import from ${mode === "maybe" ? "Maybe Finance" : "Generic CSV"}`}
-          </button>
+        <div style={{ fontWeight: 700, fontSize: 17, marginBottom: 6 }}>Restore FinTrack Backup</div>
+        <div style={{ fontSize: 14, color: "rgba(255,255,255,0.5)", lineHeight: 1.7 }}>
+          Upload a <code>.db</code> backup file exported from FinTrack. All current data will be replaced with the backup contents.
         </div>
-      </GlassCard>
+      </div>
 
-      {result && (
-        <GlassCard style={{ background: "rgba(52,211,153,0.1)", borderColor: "rgba(52,211,153,0.3)" }}>
-          <div style={{ fontWeight: 600, color: "#34d399", fontSize: 16, marginBottom: 8 }}>Import complete</div>
-          <div style={{ fontSize: 14 }}>
-            <div>✓ <strong>{result.imported}</strong> transactions imported</div>
-            {result.skipped > 0 && <div style={{ color: "rgba(255,255,255,0.5)", marginTop: 4 }}>↷ {result.skipped} rows skipped (duplicates or invalid)</div>}
-            {result.errors?.length > 0 && (
-              <div style={{ marginTop: 8, fontSize: 12, color: "#fca5a5" }}>
-                {result.errors.map((e, i) => <div key={i}>{e}</div>)}
-              </div>
-            )}
-          </div>
-        </GlassCard>
-      )}
+      <div style={{ display: "flex", alignItems: "flex-start", gap: 10, padding: "12px 14px", borderRadius: 10, background: "rgba(251,191,36,0.08)", border: "1px solid rgba(251,191,36,0.2)" }}>
+        <span style={{ fontSize: 16 }}>⚠</span>
+        <div style={{ fontSize: 13, color: "rgba(251,191,36,0.85)", lineHeight: 1.6 }}>
+          This is a destructive operation. All accounts, transactions, categories and settings will be overwritten. Make sure you have a recent backup of your current data before restoring.
+        </div>
+      </div>
+
+      <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+        <div style={{ fontSize: 13, color: "rgba(255,255,255,0.4)" }}>Download your current data first:</div>
+        <a
+          href={backupApi.downloadUrl()}
+          download
+          style={{ fontSize: 13, color: "#818cf8", textDecoration: "none", padding: "6px 12px", borderRadius: 8, border: "1px solid rgba(129,140,248,0.3)" }}
+        >
+          Download backup
+        </a>
+      </div>
+
+      <FileDropzone fileRef={fileRef} file={file} onFile={setFile} accept=".db" label="Drop .db backup file here" />
 
       {error && (
-        <GlassCard style={{ background: "rgba(239,68,68,0.1)", borderColor: "rgba(239,68,68,0.3)" }}>
-          <div style={{ color: "#f87171", fontWeight: 600 }}>Import failed</div>
-          <div style={{ fontSize: 13, color: "rgba(255,255,255,0.6)", marginTop: 4 }}>{error}</div>
-        </GlassCard>
+        <div style={{ fontSize: 13, color: "#f87171", padding: "10px 14px", borderRadius: 10, background: "rgba(239,68,68,0.1)", border: "1px solid rgba(239,68,68,0.25)" }}>
+          {error}
+        </div>
       )}
 
-      {/* Maybe export guide */}
-      <GlassCard style={{ padding: 20 }}>
-        <div style={{ fontWeight: 600, marginBottom: 10, fontSize: 14 }}>How to export from Maybe Finance</div>
-        <ol style={{ margin: 0, paddingLeft: 20, fontSize: 13, color: "rgba(255,255,255,0.55)", lineHeight: 1.8 }}>
-          <li>Open your Maybe Finance account at app.maybe.co</li>
-          <li>Go to <strong style={{ color: "rgba(255,255,255,0.8)" }}>Settings → Export</strong></li>
-          <li>Choose <strong style={{ color: "rgba(255,255,255,0.8)" }}>Transactions CSV</strong></li>
-          <li>Select the account and date range</li>
-          <li>Upload the downloaded CSV file above</li>
-        </ol>
+      <div style={{ display: "flex", gap: 10 }}>
+        <button className="glass-btn" style={{ padding: "11px 20px" }} onClick={onBack}>← Back</button>
+        <button
+          className="glass-btn"
+          style={{ flex: 1, padding: "11px 20px", opacity: (!file || loading) ? 0.5 : 1, color: "#f87171", borderColor: "rgba(248,113,113,0.3)", background: "rgba(239,68,68,0.08)" }}
+          onClick={handleRestore}
+          disabled={!file || loading}
+        >
+          {loading ? "Restoring…" : "Restore Database"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ── Main wizard ──────────────────────────────────────────────────────────────
+export default function Import() {
+  const [source, setSource] = useState(null); // "maybe" | "fintrack"
+  const [step, setStep] = useState(0);
+
+  const steps = source === "fintrack" ? STEPS_FINTRACK : source === "maybe" ? STEPS_MAYBE : ["Source"];
+
+  const chooseSource = (s) => { setSource(s); setStep(1); };
+  const back = () => { if (step === 1) { setSource(null); setStep(0); } else setStep((s) => s - 1); };
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 0, maxWidth: 620 }}>
+      <div style={{ marginBottom: 28 }}>
+        <h1 style={{ fontSize: 26, fontWeight: 700, margin: 0 }}>Import Data</h1>
+        <p style={{ color: "rgba(255,255,255,0.45)", margin: "4px 0 0", fontSize: 14 }}>Bring your financial data into FinTrack</p>
+      </div>
+
+      <StepIndicator steps={steps} current={step} />
+
+      <GlassCard style={{ padding: "28px 28px" }}>
+        {step === 0 && <StepSource onChoose={chooseSource} />}
+        {source === "maybe" && step === 1 && <StepMaybeAccounts onDone={() => setStep(2)} onBack={back} />}
+        {source === "maybe" && step === 2 && <StepMaybeTransactions onBack={back} />}
+        {source === "fintrack" && step === 1 && <StepRestore onBack={back} />}
       </GlassCard>
     </div>
   );

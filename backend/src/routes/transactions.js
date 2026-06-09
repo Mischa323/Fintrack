@@ -4,11 +4,18 @@ const { PrismaClient } = require("@prisma/client");
 const router = express.Router();
 const prisma = new PrismaClient();
 
+const INCLUDE = { account: true, toAccount: true, category: true };
+
+// Balance delta for a transaction relative to its accountId
+function delta(type, amount) {
+  return type === "INCOME" ? Number(amount) : -Number(amount);
+}
+
 router.get("/", async (req, res) => {
   const { accountId, categoryId, type, from, to, search, page = 1, limit = 50 } = req.query;
 
   const where = {};
-  if (accountId) where.accountId = accountId;
+  if (accountId) where.OR = [{ accountId }, { toAccountId: accountId }];
   if (categoryId) where.categoryId = categoryId;
   if (type) where.type = type;
   if (from || to) {
@@ -16,12 +23,12 @@ router.get("/", async (req, res) => {
     if (from) where.date.gte = new Date(from);
     if (to) where.date.lte = new Date(to);
   }
-  if (search) where.description = { contains: search, mode: "insensitive" };
+  if (search) where.description = { contains: search };
 
   const [transactions, total] = await Promise.all([
     prisma.transaction.findMany({
       where,
-      include: { account: true, category: true },
+      include: INCLUDE,
       orderBy: { date: "desc" },
       skip: (Number(page) - 1) * Number(limit),
       take: Number(limit),
@@ -33,12 +40,13 @@ router.get("/", async (req, res) => {
 });
 
 router.post("/", async (req, res) => {
-  const { accountId, categoryId, amount, description, date, type, notes } = req.body;
+  const { accountId, toAccountId, categoryId, amount, description, date, type, notes } = req.body;
 
   const transaction = await prisma.$transaction(async (tx) => {
     const t = await tx.transaction.create({
       data: {
         accountId,
+        toAccountId: type === "TRANSFER" ? (toAccountId || null) : null,
         categoryId: categoryId || null,
         amount,
         description,
@@ -46,14 +54,18 @@ router.post("/", async (req, res) => {
         type,
         notes,
       },
-      include: { account: true, category: true },
+      include: INCLUDE,
     });
 
-    const delta = type === "INCOME" ? Number(amount) : -Number(amount);
-    await tx.account.update({
-      where: { id: accountId },
-      data: { balance: { increment: delta } },
-    });
+    if (type === "TRANSFER") {
+      // Debit source, credit destination
+      await tx.account.update({ where: { id: accountId }, data: { balance: { decrement: Number(amount) } } });
+      if (toAccountId) {
+        await tx.account.update({ where: { id: toAccountId }, data: { balance: { increment: Number(amount) } } });
+      }
+    } else {
+      await tx.account.update({ where: { id: accountId }, data: { balance: { increment: delta(type, amount) } } });
+    }
 
     return t;
   });
@@ -62,23 +74,43 @@ router.post("/", async (req, res) => {
 });
 
 router.put("/:id", async (req, res) => {
-  const { categoryId, amount, description, date, type, notes } = req.body;
+  const { categoryId, amount, description, date, type, notes, toAccountId } = req.body;
 
   const transaction = await prisma.$transaction(async (tx) => {
     const old = await tx.transaction.findUniqueOrThrow({ where: { id: req.params.id } });
 
-    const oldDelta = old.type === "INCOME" ? Number(old.amount) : -Number(old.amount);
-    const newDelta = type === "INCOME" ? Number(amount) : -Number(amount);
+    // Reverse the old transaction's balance effect
+    if (old.type === "TRANSFER") {
+      await tx.account.update({ where: { id: old.accountId }, data: { balance: { increment: Number(old.amount) } } });
+      if (old.toAccountId) {
+        await tx.account.update({ where: { id: old.toAccountId }, data: { balance: { decrement: Number(old.amount) } } });
+      }
+    } else {
+      await tx.account.update({ where: { id: old.accountId }, data: { balance: { increment: -delta(old.type, old.amount) } } });
+    }
 
-    await tx.account.update({
-      where: { id: old.accountId },
-      data: { balance: { increment: newDelta - oldDelta } },
-    });
+    // Apply the new transaction's balance effect
+    if (type === "TRANSFER") {
+      await tx.account.update({ where: { id: old.accountId }, data: { balance: { decrement: Number(amount) } } });
+      if (toAccountId) {
+        await tx.account.update({ where: { id: toAccountId }, data: { balance: { increment: Number(amount) } } });
+      }
+    } else {
+      await tx.account.update({ where: { id: old.accountId }, data: { balance: { increment: delta(type, amount) } } });
+    }
 
     return tx.transaction.update({
       where: { id: req.params.id },
-      data: { categoryId: categoryId || null, amount, description, date: new Date(date), type, notes },
-      include: { account: true, category: true },
+      data: {
+        categoryId: categoryId || null,
+        amount,
+        description,
+        date: new Date(date),
+        type,
+        notes,
+        toAccountId: type === "TRANSFER" ? (toAccountId || null) : null,
+      },
+      include: INCLUDE,
     });
   });
 
@@ -88,9 +120,17 @@ router.put("/:id", async (req, res) => {
 router.delete("/:id", async (req, res) => {
   await prisma.$transaction(async (tx) => {
     const t = await tx.transaction.findUniqueOrThrow({ where: { id: req.params.id } });
-    const delta = t.type === "INCOME" ? -Number(t.amount) : Number(t.amount);
-    await tx.account.update({ where: { id: t.accountId }, data: { balance: { increment: delta } } });
-    await tx.transaction.delete({ where: { id: req.params.id } });
+
+    if (t.type === "TRANSFER") {
+      await tx.account.update({ where: { id: t.accountId }, data: { balance: { increment: Number(t.amount) } } });
+      if (t.toAccountId) {
+        await tx.account.update({ where: { id: t.toAccountId }, data: { balance: { decrement: Number(t.amount) } } });
+      }
+    } else {
+      await tx.account.update({ where: { id: t.accountId }, data: { balance: { increment: -delta(t.type, t.amount) } } });
+    }
+
+    await tx.transaction.delete({ where: { id: t.id } });
   });
   res.status(204).end();
 });

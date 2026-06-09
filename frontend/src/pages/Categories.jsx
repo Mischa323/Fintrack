@@ -12,9 +12,22 @@ export default function Categories() {
   const [modal, setModal] = useState(false);
   const [form, setForm] = useState(emptyForm);
   const [editing, setEditing] = useState(null);
+  const [seeding, setSeeding] = useState(false);
 
   const load = () => catsApi.list().then(setItems);
   useEffect(() => { load(); }, []);
+
+  const loadDefaults = async () => {
+    setSeeding(true);
+    try {
+      const result = await catsApi.seed();
+      await load();
+      if (result.created === 0) alert("All standard categories are already loaded.");
+      else alert(`${result.created} standard categories added.`);
+    } finally {
+      setSeeding(false);
+    }
+  };
 
   const open = (item = null) => {
     setEditing(item?.id || null);
@@ -42,7 +55,12 @@ export default function Categories() {
           <h1 style={{ fontSize: 26, fontWeight: 700, margin: 0 }}>Categories</h1>
           <p style={{ color: "rgba(255,255,255,0.45)", margin: "4px 0 0", fontSize: 14 }}>Organize your spending</p>
         </div>
-        <button className="glass-btn glass-btn-primary" style={{ padding: "10px 20px" }} onClick={() => open()}>+ Add Category</button>
+        <div style={{ display: "flex", gap: 10 }}>
+          <button className="glass-btn glass-btn-ghost" style={{ padding: "10px 20px" }} onClick={loadDefaults} disabled={seeding}>
+            {seeding ? "Loading…" : "Load defaults"}
+          </button>
+          <button className="glass-btn glass-btn-primary" style={{ padding: "10px 20px" }} onClick={() => open()}>+ Add Category</button>
+        </div>
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(220px,1fr))", gap: 14 }}>

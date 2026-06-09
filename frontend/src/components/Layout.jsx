@@ -1,15 +1,25 @@
-import { Outlet, NavLink } from "react-router-dom";
+import { Outlet, NavLink, useNavigate } from "react-router-dom";
+import { useAuth } from "../context/AuthContext";
 
 const NAV = [
   { to: "/dashboard", icon: "◈", label: "Dashboard" },
   { to: "/accounts", icon: "🏦", label: "Accounts" },
   { to: "/transactions", icon: "↕", label: "Transactions" },
+  { to: "/goals", icon: "◎", label: "Goals" },
   { to: "/categories", icon: "⊞", label: "Categories" },
   { to: "/recurring", icon: "⟳", label: "Recurring" },
   { to: "/import", icon: "⇪", label: "Import" },
 ];
 
 export default function Layout() {
+  const { logout } = useAuth();
+  const navigate = useNavigate();
+
+  function handleLogout() {
+    logout();
+    navigate("/login");
+  }
+
   return (
     <div style={{ display: "flex", minHeight: "100vh" }}>
       {/* Sidebar */}
@@ -29,11 +39,9 @@ export default function Layout() {
         borderRight: "1px solid rgba(255,255,255,0.1)",
       }}>
         {/* Logo */}
-        <div style={{ padding: "8px 16px 24px", borderBottom: "1px solid rgba(255,255,255,0.08)", marginBottom: 12 }}>
-          <div style={{ fontSize: 20, fontWeight: 700, background: "linear-gradient(135deg,#818cf8,#a78bfa)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>
-            FinTrack
-          </div>
-          <div style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", marginTop: 2 }}>Personal Finance</div>
+        <div style={{ padding: "8px 8px 20px", borderBottom: "1px solid rgba(255,255,255,0.08)", marginBottom: 12 }}>
+          <img src="/logo.svg" alt="FinTrack" style={{ width: 148, height: "auto", display: "block" }} />
+          <div style={{ fontSize: 11, color: "rgba(255,255,255,0.35)", marginTop: 6, paddingLeft: 2 }}>Personal Finance</div>
         </div>
 
         {NAV.map((n) => (
@@ -46,6 +54,25 @@ export default function Layout() {
             {n.label}
           </NavLink>
         ))}
+
+        {/* Bottom: Settings + Logout */}
+        <div style={{ marginTop: "auto", borderTop: "1px solid rgba(255,255,255,0.08)", paddingTop: 12, display: "flex", flexDirection: "column", gap: 4 }}>
+          <NavLink
+            to="/settings"
+            className={({ isActive }) => `nav-item${isActive ? " active" : ""}`}
+          >
+            <span style={{ fontSize: 16 }}>⚙</span>
+            Settings
+          </NavLink>
+          <button
+            onClick={handleLogout}
+            className="nav-item"
+            style={{ background: "none", border: "none", cursor: "pointer", color: "rgba(255,255,255,0.5)", textAlign: "left", width: "100%" }}
+          >
+            <span style={{ fontSize: 16 }}>⏻</span>
+            Sign out
+          </button>
+        </div>
       </aside>
 
       {/* Main content */}

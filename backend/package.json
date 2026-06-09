@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "type": "commonjs",
   "scripts": {
+    "postinstall": "prisma generate && prisma migrate deploy",
     "dev": "nodemon src/index.js",
     "start": "node src/index.js",
     "db:migrate": "prisma migrate deploy",
@@ -12,13 +13,22 @@
   },
   "dependencies": {
     "@prisma/client": "^5.14.0",
+    "bcryptjs": "^3.0.3",
+    "cookie-parser": "^1.4.7",
     "cors": "^2.8.5",
     "csv-parse": "^5.5.6",
     "dotenv": "^16.4.5",
     "express": "^4.19.2",
     "express-async-errors": "^3.1.1",
+    "express-session": "^1.19.0",
+    "googleapis": "^144.0.0",
+    "jsonwebtoken": "^9.0.3",
     "multer": "^1.4.5-lts.1",
-    "node-cron": "^3.0.3"
+    "node-cron": "^3.0.3",
+    "openid-client": "^4.9.1",
+    "qrcode": "^1.5.4",
+    "speakeasy": "^2.0.0",
+    "ssh2-sftp-client": "^11.0.0"
   },
   "devDependencies": {
     "nodemon": "^3.1.4",

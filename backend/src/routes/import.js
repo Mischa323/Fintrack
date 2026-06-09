@@ -59,15 +59,47 @@ function parseGenericRow(row) {
 
 async function resolveCategory(name) {
   if (!name) return null;
-  const cat = await prisma.category.findFirst({
-    where: { name: { equals: name, mode: "insensitive" } },
-  });
-  if (cat) return cat.id;
+  const results = await prisma.$queryRaw`SELECT id FROM "Category" WHERE LOWER(name) = LOWER(${name}) LIMIT 1`;
+  if (results.length > 0) return results[0].id;
   const created = await prisma.category.create({
     data: { name, color: "#6b7280" },
   });
   return created.id;
 }
+
+// Import Maybe Finance accounts.csv to sync account balances
+router.post("/maybe-accounts", upload.single("file"), async (req, res) => {
+  if (!req.file) return res.status(400).json({ error: "CSV file required" });
+
+  const content = fs.readFileSync(req.file.path, "utf8");
+  fs.unlinkSync(req.file.path);
+
+  const rows = await new Promise((resolve, reject) => {
+    parse(content, { columns: true, skip_empty_lines: true, trim: true }, (err, records) => {
+      if (err) reject(err);
+      else resolve(records);
+    });
+  });
+
+  const results = [];
+  for (const row of rows) {
+    const name = row.name || row.Name || row.account_name || null;
+    const balance = parseFloat(row.balance || row.Balance || row.current_balance || 0);
+    const currency = row.currency || row.Currency || "EUR";
+    if (!name || isNaN(balance)) continue;
+
+    const existing = await prisma.account.findFirst({ where: { name } });
+    if (existing) {
+      await prisma.account.update({ where: { id: existing.id }, data: { balance, currency } });
+      results.push({ name, balance, action: "updated" });
+    } else {
+      await prisma.account.create({ data: { name, balance, currency, type: "CHECKING" } });
+      results.push({ name, balance, action: "created" });
+    }
+  }
+
+  res.json({ accounts: results });
+});
 
 router.post("/maybe", upload.single("file"), async (req, res) => {
   const { accountId } = req.body;
@@ -126,21 +158,14 @@ async function importCsv(filePath, accountId, rowParser, source) {
       };
 
       if (parsed.externalId) {
-        await prisma.transaction.upsert({
+        const existing = await prisma.transaction.findUnique({
           where: { externalId_accountId: { externalId: parsed.externalId, accountId } },
-          create: data,
-          update: {},
+          select: { id: true },
         });
-      } else {
-        await prisma.transaction.create({ data });
+        if (existing) { skipped++; continue; }
       }
 
-      const delta = parsed.type === "INCOME" ? parsed.amount : -parsed.amount;
-      await prisma.account.update({
-        where: { id: accountId },
-        data: { balance: { increment: delta } },
-      });
-
+      await prisma.transaction.create({ data });
       imported++;
     } catch (err) {
       errors.push(err.message);
@@ -150,5 +175,23 @@ async function importCsv(filePath, accountId, rowParser, source) {
 
   return { imported, skipped, errors: errors.slice(0, 10) };
 }
+
+router.delete("/clear", async (req, res) => {
+  const { accountId, source } = req.query;
+  if (!accountId) return res.status(400).json({ error: "accountId required" });
+
+  const where = { accountId, importedFrom: source || undefined };
+  const deleted = await prisma.transaction.deleteMany({ where });
+
+  // Recalculate balance from remaining transactions
+  const [income, expense] = await Promise.all([
+    prisma.transaction.aggregate({ _sum: { amount: true }, where: { accountId, type: "INCOME" } }),
+    prisma.transaction.aggregate({ _sum: { amount: true }, where: { accountId, type: "EXPENSE" } }),
+  ]);
+  const newBalance = Number(income._sum.amount || 0) - Number(expense._sum.amount || 0);
+  await prisma.account.update({ where: { id: accountId }, data: { balance: newBalance } });
+
+  res.json({ deleted: deleted.count, newBalance });
+});
 
 module.exports = router;

@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%"   stop-color="#1e1b4b"/>
+      <stop offset="100%" stop-color="#0a0a1a"/>
+    </linearGradient>
+    <linearGradient id="fin" x1="30%" y1="100%" x2="70%" y2="0%">
+      <stop offset="0%"   stop-color="#312e81"/>
+      <stop offset="35%"  stop-color="#6366f1"/>
+      <stop offset="70%"  stop-color="#8b5cf6"/>
+      <stop offset="100%" stop-color="#c4b5fd"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Dark rounded background -->
+  <rect width="64" height="64" rx="14" fill="url(#bg)"/>
+
+  <!-- Water ripple -->
+  <path d="M 6,52 Q 16,48 26,52 Q 36,56 48,52"
+        stroke="#818cf8" stroke-opacity="0.4" stroke-width="1.5"
+        stroke-linecap="round" fill="none"/>
+
+  <!-- Dorsal fin -->
+  <path d="M 8,52
+           C 5,40 7,20 24,8
+           C 28,4 33,4 36,8
+           C 39,14 41,34 47,50
+           L 51,52
+           Q 29,58 8,52 Z"
+        fill="url(#fin)"
+        stroke="rgba(167,139,250,0.3)" stroke-width="0.75"/>
+
+  <!-- Glass specular highlight -->
+  <path d="M 24,8 C 28,4 33,4 36,8 C 38,13 40,30 45,49 Q 36,52 29,51 Z"
+        fill="white" fill-opacity="0.13"/>
+</svg>
