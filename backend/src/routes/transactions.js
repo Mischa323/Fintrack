@@ -4,7 +4,15 @@ const { PrismaClient } = require("@prisma/client");
 const router = express.Router();
 const prisma = new PrismaClient();
 
-const INCLUDE = { account: true, toAccount: true, category: true };
+const INCLUDE = {
+  account: true,
+  toAccount: true,
+  category: true,
+  attachments: {
+    select: { id: true, filename: true, mimeType: true, size: true, createdAt: true },
+    orderBy: { createdAt: "asc" },
+  },
+};
 
 // Balance delta for a transaction relative to its accountId
 function delta(type, amount) {

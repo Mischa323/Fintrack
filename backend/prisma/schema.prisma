@@ -69,10 +69,24 @@ model Transaction {
   recurring    RecurringTransaction? @relation(fields: [recurringId], references: [id])
   importedFrom String?
   externalId   String?
+  attachments  Attachment[]
   createdAt    DateTime              @default(now())
   updatedAt    DateTime              @updatedAt
 
   @@unique([externalId, accountId])
+}
+
+model Attachment {
+  id            String      @id @default(cuid())
+  transactionId String
+  transaction   Transaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+  filename      String
+  mimeType      String
+  size          Int
+  storagePath   String
+  createdAt     DateTime    @default(now())
+
+  @@index([transactionId])
 }
 
 model User {

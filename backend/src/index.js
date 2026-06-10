@@ -10,6 +10,7 @@ const usersRouter = require("./routes/users");
 const configRouter = require("./routes/config");
 const accountsRouter = require("./routes/accounts");
 const transactionsRouter = require("./routes/transactions");
+const attachmentsRouter = require("./routes/attachments");
 const categoriesRouter = require("./routes/categories");
 const recurringRouter = require("./routes/recurring");
 const importRouter = require("./routes/import");
@@ -38,6 +39,7 @@ app.use("/users", requireAdmin, usersRouter);
 app.use("/config", configRouter);
 app.use("/accounts", accountsRouter);
 app.use("/transactions", transactionsRouter);
+app.use(attachmentsRouter); // /transactions/:id/attachments, /attachments/:id
 app.use("/categories", categoriesRouter);
 app.use("/recurring", recurringRouter);
 app.use("/import", importRouter);

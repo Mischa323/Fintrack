@@ -38,6 +38,16 @@ export const transactions = {
   remove: (id) => api.delete(`/transactions/${id}`),
 };
 
+export const attachments = {
+  upload: (transactionId, files) => {
+    const form = new FormData();
+    files.forEach((f) => form.append("files", f));
+    return api.post(`/transactions/${transactionId}/attachments`, form).then((r) => r.data);
+  },
+  blob: (id) => api.get(`/attachments/${id}`, { responseType: "blob" }).then((r) => r.data),
+  remove: (id) => api.delete(`/attachments/${id}`),
+};
+
 export const categories = {
   list: () => api.get("/categories").then((r) => r.data),
   create: (data) => api.post("/categories", data).then((r) => r.data),
