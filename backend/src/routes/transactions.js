@@ -9,7 +9,7 @@ const INCLUDE = {
   toAccount: true,
   category: true,
   attachments: {
-    select: { id: true, filename: true, mimeType: true, size: true, createdAt: true },
+    select: { id: true, filename: true, mimeType: true, size: true, tags: true, createdAt: true },
     orderBy: { createdAt: "asc" },
   },
 };
@@ -23,7 +23,8 @@ router.get("/", async (req, res) => {
   const { accountId, categoryId, type, from, to, search, page = 1, limit = 50 } = req.query;
 
   const where = {};
-  if (accountId) where.OR = [{ accountId }, { toAccountId: accountId }];
+  const and = [];
+  if (accountId) and.push({ OR: [{ accountId }, { toAccountId: accountId }] });
   if (categoryId) where.categoryId = categoryId;
   if (type) where.type = type;
   if (from || to) {
@@ -31,7 +32,16 @@ router.get("/", async (req, res) => {
     if (from) where.date.gte = new Date(from);
     if (to) where.date.lte = new Date(to);
   }
-  if (search) where.description = { contains: search };
+  // Search matches the description OR any AI-generated attachment tag.
+  if (search) {
+    and.push({
+      OR: [
+        { description: { contains: search } },
+        { attachments: { some: { tags: { contains: search } } } },
+      ],
+    });
+  }
+  if (and.length) where.AND = and;
 
   const [transactions, total] = await Promise.all([
     prisma.transaction.findMany({

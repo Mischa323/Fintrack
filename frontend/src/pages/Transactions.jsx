@@ -11,6 +11,8 @@ import Dialog from "../components/Dialog";
 import { format } from "date-fns";
 
 const fmt = (n) => new Intl.NumberFormat("nl-NL", { style: "currency", currency: "EUR" }).format(n);
+const parseTags = (raw) => { try { const a = JSON.parse(raw || "[]"); return Array.isArray(a) ? a : []; } catch { return []; } };
+const txnTags = (t) => (t.attachments || []).flatMap((a) => parseTags(a.tags));
 const fmtDate = (d) =>
   new Date(d).toLocaleDateString("nl-NL", { day: "numeric", month: "short", year: "numeric" });
 
@@ -125,7 +127,9 @@ export default function Transactions() {
               <div><span className={`badge badge-${t.type.toLowerCase()}`}>{t.type}</span></div>
               <div>
                 {files.length > 0
-                  ? <span title={`${files.length} attachment${files.length > 1 ? "s" : ""}`} style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 12, color: "#c4b5fd" }}>📎 {files.length}</span>
+                  ? (() => { const tags = txnTags(t); return (
+                      <span title={tags.length ? `Tags: ${tags.join(", ")}` : `${files.length} attachment${files.length > 1 ? "s" : ""}`} style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 12, color: "#c4b5fd" }}>📎 {files.length}</span>
+                    ); })()
                   : <span style={{ color: "rgba(255,255,255,0.25)" }}>—</span>}
               </div>
               <div className="ft-tabular" style={{ textAlign: "right", fontWeight: 600, color, fontVariantNumeric: "tabular-nums" }}>{sign}{fmt(Number(t.amount))}</div>
@@ -174,8 +178,9 @@ function TransactionModal({ mode, txn, accounts, categories, onClose, onSaved })
 
   // Attachments: existing (have serverId) + newly picked local File objects.
   const [items, setItems] = useState(() =>
-    (txn?.attachments || []).map((a) => ({ key: a.id, serverId: a.id, name: a.filename, type: a.mimeType, size: a.size }))
+    (txn?.attachments || []).map((a) => ({ key: a.id, serverId: a.id, name: a.filename, type: a.mimeType, size: a.size, tags: parseTags(a.tags) }))
   );
+  const [retagging, setRetagging] = useState(false);
   const [removedIds, setRemovedIds] = useState([]);
   const [preview, setPreview] = useState(null);
   const [err, setErr] = useState("");
@@ -196,6 +201,19 @@ function TransactionModal({ mode, txn, accounts, categories, onClose, onSaved })
   const removeItem = (item) => {
     if (item.serverId) setRemovedIds((r) => [...r, item.serverId]);
     setItems((cur) => cur.filter((it) => it.key !== item.key));
+  };
+
+  const reanalyze = async () => {
+    setRetagging(true);
+    try {
+      const res = await attachmentsApi.retag(txn.id);
+      const byId = Object.fromEntries(res.map((r) => [r.id, parseTags(r.tags)]));
+      setItems((cur) => cur.map((it) => (it.serverId && byId[it.serverId] ? { ...it, tags: byId[it.serverId] } : it)));
+    } catch (e) {
+      setErr(e.response?.data?.error || e.message || "Re-analyze failed");
+    } finally {
+      setRetagging(false);
+    }
   };
 
   const save = async () => {
@@ -348,6 +366,30 @@ function TransactionModal({ mode, txn, accounts, categories, onClose, onSaved })
           </div>
           <input ref={fileRef} type="file" accept="image/*,application/pdf" multiple onChange={onPick} style={{ display: "none" }} />
           <p style={{ fontSize: 11, color: "rgba(255,255,255,0.35)", margin: "8px 0 0" }}>Attach photos of receipts or PDF invoices — image, PDF.</p>
+
+          {(() => {
+            const allTags = [...new Set(items.flatMap((it) => it.tags || []))];
+            const hasExisting = items.some((it) => it.serverId);
+            if (allTags.length === 0 && !(isEdit && hasExisting)) return null;
+            return (
+              <div style={{ marginTop: 12 }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: allTags.length ? 6 : 0 }}>
+                  <span style={{ fontSize: 11, color: "rgba(255,255,255,0.5)" }}>🏷️ AI tags <span style={{ color: "rgba(255,255,255,0.3)" }}>· searchable</span></span>
+                  {isEdit && hasExisting && (
+                    <button type="button" onClick={reanalyze} disabled={retagging} className="glass-btn glass-btn-ghost" style={{ padding: "3px 10px", fontSize: 11 }}>
+                      {retagging ? "Analyzing…" : "Re-analyze"}
+                    </button>
+                  )}
+                </div>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                  {allTags.map((tag) => (
+                    <span key={tag} style={{ background: "rgba(196,181,253,0.12)", color: "#c4b5fd", border: "1px solid rgba(196,181,253,0.25)", padding: "2px 9px", borderRadius: 999, fontSize: 11 }}>{tag}</span>
+                  ))}
+                  {allTags.length === 0 && <span style={{ fontSize: 11, color: "rgba(255,255,255,0.3)" }}>No tags yet — click Re-analyze to read these receipts.</span>}
+                </div>
+              </div>
+            );
+          })()}
         </div>
 
         {err && <div style={{ fontSize: 12, color: "#fca5a5" }}>{err}</div>}

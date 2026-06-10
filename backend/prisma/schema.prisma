@@ -84,6 +84,7 @@ model Attachment {
   mimeType      String
   size          Int
   storagePath   String
+  tags          String?     // JSON-encoded array of AI-generated tags
   createdAt     DateTime    @default(now())
 
   @@index([transactionId])
@@ -119,6 +120,12 @@ model Settings {
   googleOidcEnabled  Boolean  @default(false)
   googleClientId     String?
   googleClientSecret String?
+  aiTaggingEnabled   Boolean  @default(false)
+  aiProvider         String   @default("claude") // "claude" | "odysseus"
+  aiModel            String?  // Claude model id, or Odysseus model name
+  anthropicApiKey    String?
+  odysseusBaseUrl    String?
+  odysseusApiKey     String?
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
 }

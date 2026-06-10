@@ -46,6 +46,7 @@ export const attachments = {
   },
   blob: (id) => api.get(`/attachments/${id}`, { responseType: "blob" }).then((r) => r.data),
   remove: (id) => api.delete(`/attachments/${id}`),
+  retag: (transactionId) => api.post(`/transactions/${transactionId}/attachments/retag`).then((r) => r.data),
 };
 
 export const categories = {

@@ -3,9 +3,12 @@ const multer = require("multer");
 const fs = require("fs");
 const path = require("path");
 const { PrismaClient } = require("@prisma/client");
+const { loadAiConfig, tagStoredAttachment } = require("../services/aiTagging");
 
 const router = express.Router();
 const prisma = new PrismaClient();
+
+const ATT_SELECT = { id: true, filename: true, mimeType: true, size: true, tags: true, createdAt: true };
 
 const UPLOAD_DIR = path.join(__dirname, "../../uploads/attachments");
 fs.mkdirSync(UPLOAD_DIR, { recursive: true });
@@ -45,12 +48,45 @@ router.post("/transactions/:id/attachments", upload.array("files"), async (req, 
           size: f.size,
           storagePath: path.basename(f.path),
         },
-        select: { id: true, filename: true, mimeType: true, size: true, createdAt: true },
+        select: { ...ATT_SELECT, storagePath: true },
       })
     )
   );
 
-  res.status(201).json(created);
+  // Best-effort AI tagging — never fails the upload.
+  const aiConfig = await loadAiConfig().catch(() => null);
+  if (aiConfig) {
+    await Promise.all(
+      created.map(async (att) => {
+        try {
+          att.tags = JSON.stringify(await tagStoredAttachment(att, aiConfig));
+        } catch (e) {
+          console.error(`AI tagging failed for attachment ${att.id}:`, e.message);
+        }
+      })
+    );
+  }
+
+  res.status(201).json(created.map(({ storagePath, ...rest }) => rest));
+});
+
+// POST /transactions/:id/attachments/retag — re-run AI tagging on all of a transaction's attachments
+router.post("/transactions/:id/attachments/retag", async (req, res) => {
+  const aiConfig = await loadAiConfig();
+  if (!aiConfig) return res.status(400).json({ error: "AI tagging is not enabled" });
+
+  const attachments = await prisma.attachment.findMany({ where: { transactionId: req.params.id } });
+  const results = await Promise.all(
+    attachments.map(async (att) => {
+      try {
+        const tags = await tagStoredAttachment(att, aiConfig);
+        return { id: att.id, filename: att.filename, mimeType: att.mimeType, size: att.size, tags: JSON.stringify(tags), createdAt: att.createdAt };
+      } catch (e) {
+        return { id: att.id, filename: att.filename, mimeType: att.mimeType, size: att.size, tags: att.tags, createdAt: att.createdAt, error: e.message };
+      }
+    })
+  );
+  res.json(results);
 });
 
 // GET /attachments/:id — stream the stored file for inline viewing
