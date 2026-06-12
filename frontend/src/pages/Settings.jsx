@@ -718,6 +718,124 @@ function BackupManager() {
   );
 }
 
+// ── AI / Receipt tagging ─────────────────────────────────────
+const CLAUDE_MODELS = [
+  { value: "claude-haiku-4-5", label: "Claude Haiku 4.5 — fast & cheap (recommended)" },
+  { value: "claude-sonnet-4-6", label: "Claude Sonnet 4.6 — balanced" },
+  { value: "claude-opus-4-8", label: "Claude Opus 4.8 — most accurate" },
+];
+
+function AiConfig() {
+  const [cfg, setCfg] = useState({
+    aiTaggingEnabled: false, aiProvider: "claude", aiModel: "claude-haiku-4-5",
+    anthropicApiKey: "", hasAnthropicApiKey: false,
+    odysseusBaseUrl: "", odysseusApiKey: "", hasOdysseusApiKey: false,
+  });
+  const [loaded, setLoaded] = useState(false);
+  const [msg, setMsg] = useState(null);
+
+  useEffect(() => {
+    api.get("/config").then(res => {
+      const d = res.data;
+      setCfg({
+        aiTaggingEnabled: d.aiTaggingEnabled ?? false,
+        aiProvider: d.aiProvider ?? "claude",
+        aiModel: d.aiModel || "claude-haiku-4-5",
+        anthropicApiKey: "", hasAnthropicApiKey: d.hasAnthropicApiKey ?? false,
+        odysseusBaseUrl: d.odysseusBaseUrl ?? "", odysseusApiKey: "", hasOdysseusApiKey: d.hasOdysseusApiKey ?? false,
+      });
+      setLoaded(true);
+    });
+  }, []);
+
+  const set = (patch) => setCfg(c => ({ ...c, ...patch }));
+
+  function switchProvider(provider) {
+    set({ aiProvider: provider, aiModel: provider === "claude" ? (CLAUDE_MODELS.some(m => m.value === cfg.aiModel) ? cfg.aiModel : "claude-haiku-4-5") : (CLAUDE_MODELS.some(m => m.value === cfg.aiModel) ? "" : cfg.aiModel) });
+  }
+
+  async function handleSubmit(e) {
+    e.preventDefault(); setMsg(null);
+    try {
+      await api.put("/config", {
+        aiTaggingEnabled: cfg.aiTaggingEnabled,
+        aiProvider: cfg.aiProvider,
+        aiModel: cfg.aiModel || undefined,
+        anthropicApiKey: cfg.anthropicApiKey || undefined,
+        odysseusBaseUrl: cfg.odysseusBaseUrl || undefined,
+        odysseusApiKey: cfg.odysseusApiKey || undefined,
+      });
+      setMsg({ type: "success", text: "AI settings saved" });
+      setCfg(c => ({ ...c, anthropicApiKey: "", odysseusApiKey: "", hasAnthropicApiKey: c.hasAnthropicApiKey || !!c.anthropicApiKey, hasOdysseusApiKey: c.hasOdysseusApiKey || !!c.odysseusApiKey }));
+    } catch (err) { setMsg({ type: "error", text: err.response?.data?.error || "Failed to save" }); }
+  }
+
+  if (!loaded) return <p style={{ color: "rgba(255,255,255,0.4)", fontSize: 14 }}>Loading…</p>;
+
+  return (
+    <form onSubmit={handleSubmit}>
+      <p style={{ color: "rgba(255,255,255,0.5)", fontSize: 14, margin: "0 0 20px" }}>
+        Let AI read the receipts &amp; invoices attached to transactions and add searchable tags
+        (merchant, category, line items). Tags are matched by the Transactions search box.
+      </p>
+      <Alert type={msg?.type} message={msg?.text} />
+
+      <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontSize: 14, color: "rgba(255,255,255,0.8)", marginBottom: 20 }}>
+        <input type="checkbox" checked={cfg.aiTaggingEnabled} onChange={e => set({ aiTaggingEnabled: e.target.checked })} style={{ accentColor: "#818cf8", width: 16, height: 16 }} />
+        Enable AI tagging of receipts &amp; invoices
+      </label>
+
+      <Field label="AI provider">
+        <div style={{ display: "flex", gap: 8 }}>
+          {[{ id: "claude", label: "Claude (Anthropic)" }, { id: "odysseus", label: "Odysseus (self-hosted)" }].map(p => {
+            const active = cfg.aiProvider === p.id;
+            return (
+              <button key={p.id} type="button" onClick={() => switchProvider(p.id)}
+                style={{ flex: 1, padding: "9px", borderRadius: 10, fontSize: 13, fontWeight: 600, cursor: "pointer",
+                  background: active ? "rgba(99,102,241,0.18)" : "rgba(255,255,255,0.05)",
+                  color: active ? "#c7d2fe" : "rgba(255,255,255,0.5)",
+                  border: `1px solid ${active ? "rgba(129,140,248,0.5)" : "rgba(255,255,255,0.1)"}` }}>
+                {p.label}
+              </button>
+            );
+          })}
+        </div>
+      </Field>
+
+      {cfg.aiProvider === "claude" ? (
+        <>
+          <Field label="Model">
+            <select className="glass-input" style={sel} value={cfg.aiModel} onChange={e => set({ aiModel: e.target.value })}>
+              {CLAUDE_MODELS.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
+            </select>
+          </Field>
+          <Field label={`Anthropic API key${cfg.hasAnthropicApiKey ? " (leave blank to keep current)" : ""}`}>
+            <input className="glass-input" style={inp} type="password" value={cfg.anthropicApiKey} onChange={e => set({ anthropicApiKey: e.target.value })} placeholder={cfg.hasAnthropicApiKey ? "••••••••" : "sk-ant-…"} />
+          </Field>
+        </>
+      ) : (
+        <>
+          <Field label="Odysseus base URL">
+            <input className="glass-input" style={inp} value={cfg.odysseusBaseUrl} onChange={e => set({ odysseusBaseUrl: e.target.value })} placeholder="http://localhost:7000" />
+          </Field>
+          <Field label="Model (optional — Odysseus default if blank)">
+            <input className="glass-input" style={inp} value={cfg.aiModel} onChange={e => set({ aiModel: e.target.value })} placeholder="e.g. llama3.2-vision" />
+          </Field>
+          <Field label={`Odysseus API token${cfg.hasOdysseusApiKey ? " (leave blank to keep current)" : ""}`}>
+            <input className="glass-input" style={inp} type="password" value={cfg.odysseusApiKey} onChange={e => set({ odysseusApiKey: e.target.value })} placeholder={cfg.hasOdysseusApiKey ? "••••••••" : "ody_…"} />
+          </Field>
+          <p style={{ fontSize: 12, color: "rgba(255,255,255,0.4)", margin: "0 0 16px", lineHeight: 1.5 }}>
+            Create an API token in Odysseus (Settings → API tokens). FinTrack uploads each receipt, opens a
+            session, and asks for tags — so the Odysseus model you use must support image/PDF input.
+          </p>
+        </>
+      )}
+
+      <button type="submit" className="glass-btn glass-btn-primary" style={{ padding: "9px 20px" }}>Save AI settings</button>
+    </form>
+  );
+}
+
 // ── Main Settings page ───────────────────────────────────────
 const NAV_TABS = [
   { id: "appearance", label: "Appearance", icon: "🎨" },
@@ -725,6 +843,7 @@ const NAV_TABS = [
   { id: "users",      label: "Users",      icon: "👥", adminOnly: true },
   { id: "server",     label: "Server",     icon: "⚙",  adminOnly: true },
   { id: "sso",        label: "SSO",        icon: "🔑", adminOnly: true },
+  { id: "ai",         label: "AI",         icon: "🤖", adminOnly: true },
   { id: "backups",    label: "Backups",    icon: "💾", adminOnly: true },
 ];
 
@@ -822,6 +941,13 @@ export default function Settings() {
             <Divider />
             <SectionTitle help={GUIDES.googleSso}>Google Sign-In</SectionTitle>
             <GoogleSsoConfig />
+          </>
+        )}
+
+        {isAdmin && activeTab === "ai" && (
+          <>
+            <SectionTitle>AI receipt tagging</SectionTitle>
+            <AiConfig />
           </>
         )}
 

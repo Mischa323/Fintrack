@@ -69,10 +69,25 @@ model Transaction {
   recurring    RecurringTransaction? @relation(fields: [recurringId], references: [id])
   importedFrom String?
   externalId   String?
+  attachments  Attachment[]
   createdAt    DateTime              @default(now())
   updatedAt    DateTime              @updatedAt
 
   @@unique([externalId, accountId])
+}
+
+model Attachment {
+  id            String      @id @default(cuid())
+  transactionId String
+  transaction   Transaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+  filename      String
+  mimeType      String
+  size          Int
+  storagePath   String
+  tags          String?     // JSON-encoded array of AI-generated tags
+  createdAt     DateTime    @default(now())
+
+  @@index([transactionId])
 }
 
 model User {
@@ -105,6 +120,12 @@ model Settings {
   googleOidcEnabled  Boolean  @default(false)
   googleClientId     String?
   googleClientSecret String?
+  aiTaggingEnabled   Boolean  @default(false)
+  aiProvider         String   @default("claude") // "claude" | "odysseus"
+  aiModel            String?  // Claude model id, or Odysseus model name
+  anthropicApiKey    String?
+  odysseusBaseUrl    String?
+  odysseusApiKey     String?
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
 }
