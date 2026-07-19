@@ -39,31 +39,58 @@ router.get("/overview", async (req, res) => {
   res.json({ totalBalance, totalIncome, totalExpenses, spendingByCategory, accounts });
 });
 
+// Buckets income/expenses over a period. Falls back to the last 6 months when no
+// range is given. Spans longer than two years are grouped by year so the chart
+// stays readable instead of rendering 60+ bars.
 router.get("/monthly", async (req, res) => {
-  const months = 6;
-  const now = new Date();
-  const from = new Date(now.getFullYear(), now.getMonth() - months + 1, 1);
+  const { from, to } = req.query;
+  const end = to ? new Date(to) : new Date();
+
+  let start = from ? new Date(from) : null;
+  if (!start) {
+    const earliest = await prisma.transaction.findFirst({
+      orderBy: { date: "asc" },
+      select: { date: true },
+    });
+    start = earliest?.date || new Date(end.getFullYear(), end.getMonth() - 5, 1);
+  }
+  if (start > end) start = new Date(end.getFullYear(), end.getMonth() - 5, 1);
 
   const transactions = await prisma.transaction.findMany({
-    where: { date: { gte: from } },
+    where: { date: { gte: start, lte: end } },
     select: { amount: true, type: true, date: true },
   });
 
-  const data = {};
-  for (let i = 0; i < months; i++) {
-    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
-    data[key] = { month: key, income: 0, expenses: 0 };
+  const spanMonths =
+    (end.getFullYear() - start.getFullYear()) * 12 + (end.getMonth() - start.getMonth()) + 1;
+  const byYear = spanMonths > 24;
+
+  // Pre-seed buckets so periods without transactions still appear on the chart
+  const buckets = new Map();
+  if (byYear) {
+    for (let y = start.getFullYear(); y <= end.getFullYear(); y++) {
+      buckets.set(String(y), { month: String(y), income: 0, expenses: 0 });
+    }
+  } else {
+    const cursor = new Date(start.getFullYear(), start.getMonth(), 1);
+    while (cursor <= end) {
+      const key = `${cursor.getFullYear()}-${String(cursor.getMonth() + 1).padStart(2, "0")}`;
+      buckets.set(key, { month: key, income: 0, expenses: 0 });
+      cursor.setMonth(cursor.getMonth() + 1);
+    }
   }
 
   for (const t of transactions) {
-    const key = `${t.date.getFullYear()}-${String(t.date.getMonth() + 1).padStart(2, "0")}`;
-    if (!data[key]) continue;
-    if (t.type === "INCOME") data[key].income += Number(t.amount);
-    else if (t.type === "EXPENSE") data[key].expenses += Number(t.amount);
+    const key = byYear
+      ? String(t.date.getFullYear())
+      : `${t.date.getFullYear()}-${String(t.date.getMonth() + 1).padStart(2, "0")}`;
+    const bucket = buckets.get(key);
+    if (!bucket) continue;
+    if (t.type === "INCOME") bucket.income += Number(t.amount);
+    else if (t.type === "EXPENSE") bucket.expenses += Number(t.amount);
   }
 
-  res.json(Object.values(data).reverse());
+  res.json([...buckets.values()]);
 });
 
 module.exports = router;

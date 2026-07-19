@@ -21,8 +21,8 @@ function hexToRgb(hex) {
 
 const WIDGET_META = {
   "stat-balance":     { label: "Total Balance",        icon: "💰", defaultCols: 3 },
-  "stat-income":      { label: "Income (all time)",    icon: "📈", defaultCols: 3 },
-  "stat-expenses":    { label: "Expenses (all time)",  icon: "📉", defaultCols: 3 },
+  "stat-income":      { label: "Income",               icon: "📈", defaultCols: 3 },
+  "stat-expenses":    { label: "Expenses",             icon: "📉", defaultCols: 3 },
   "stat-netflow":     { label: "Net Flow",             icon: "⚡", defaultCols: 3 },
   "chart-monthly":    { label: "Income vs Expenses",   icon: "📊", defaultCols: 8 },
   "chart-categories": { label: "Spending by Category", icon: "🍩", defaultCols: 4 },
@@ -103,18 +103,90 @@ function useDashboardConfig() {
   };
 }
 
+// ── Time range ────────────────────────────────────────────────────────────────
+
+const RANGES = [
+  { id: "ytd", label: "This year" },
+  { id: "1y",  label: "1 year"    },
+  { id: "2y",  label: "2 years"   },
+  { id: "5y",  label: "5 years"   },
+  { id: "all", label: "All time"  },
+];
+
+const RANGE_LS_KEY = "fintrack_dashboard_range";
+
+// Translates a range id into query params for the stats endpoints.
+// Boundaries are anchored to UTC midnight: transaction dates are stored as
+// date-only (UTC), so a local-midnight boundary would bleed into the prior year.
+function rangeParams(id) {
+  const now = new Date();
+  if (id === "all") return {};
+  if (id === "ytd") {
+    return { from: new Date(Date.UTC(now.getUTCFullYear(), 0, 1)).toISOString() };
+  }
+  const years = { "1y": 1, "2y": 2, "5y": 5 }[id] || 1;
+  const from = new Date(Date.UTC(now.getUTCFullYear() - years, now.getUTCMonth(), now.getUTCDate()));
+  return { from: from.toISOString() };
+}
+
+function useRange() {
+  const [range, setRange] = useState(() => {
+    try {
+      const saved = localStorage.getItem(RANGE_LS_KEY);
+      if (saved && RANGES.some(r => r.id === saved)) return saved;
+    } catch {}
+    return "ytd";
+  });
+
+  const update = (id) => {
+    setRange(id);
+    try { localStorage.setItem(RANGE_LS_KEY, id); } catch {}
+  };
+
+  return [range, update];
+}
+
+function RangeSelector({ value, onChange }) {
+  return (
+    <div style={{ display: "flex", gap: 4, padding: 4, borderRadius: 10, background: "rgba(255,255,255,0.05)" }}>
+      {RANGES.map(r => {
+        const active = r.id === value;
+        return (
+          <button
+            key={r.id}
+            onClick={() => onChange(r.id)}
+            style={{
+              padding: "6px 12px", borderRadius: 7, border: "none", cursor: "pointer",
+              fontSize: 13, fontWeight: active ? 600 : 500,
+              background: active ? "rgba(129,140,248,0.9)" : "transparent",
+              color: active ? "#0f172a" : "rgba(255,255,255,0.55)",
+              transition: "all 0.15s",
+            }}
+          >
+            {r.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 // ── Shared data fetcher ───────────────────────────────────────────────────────
 
-function useStatsData() {
+function useStatsData(range) {
   const [overview, setOverview] = useState(null);
   const [monthly, setMonthly]   = useState([]);
   const [loading, setLoading]   = useState(true);
 
   useEffect(() => {
-    Promise.all([stats.overview(), stats.monthly()])
-      .then(([o, m]) => { setOverview(o); setMonthly(m); })
-      .finally(() => setLoading(false));
-  }, []);
+    let cancelled = false;
+    setLoading(true);
+    const params = rangeParams(range);
+    Promise.all([stats.overview(params), stats.monthly(params)])
+      .then(([o, m]) => { if (!cancelled) { setOverview(o); setMonthly(m); } })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [range]);
 
   return { overview, monthly, loading };
 }
@@ -544,7 +616,8 @@ function InlineRename({ value, onSave, onCancel }) {
 // ── Main Dashboard ────────────────────────────────────────────────────────────
 
 export default function Dashboard() {
-  const { overview, monthly, loading } = useStatsData();
+  const [range, setRange] = useRange();
+  const { overview, monthly, loading } = useStatsData(range);
   const { config, active, setActive, create, rename, remove, updateWidgets } = useDashboardConfig();
   const [editMode, setEditMode]   = useState(false);
   const [showAdd, setShowAdd]     = useState(false);
@@ -594,15 +667,20 @@ export default function Dashboard() {
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 12 }}>
         <div>
           <h1 style={{ fontSize: 26, fontWeight: 700, margin: 0 }}>Dashboard</h1>
-          <p style={{ color: "rgba(255,255,255,0.45)", margin: "4px 0 0", fontSize: 14 }}>Your financial overview</p>
+          <p style={{ color: "rgba(255,255,255,0.45)", margin: "4px 0 0", fontSize: 14 }}>
+            Your financial overview — {RANGES.find(r => r.id === range)?.label.toLowerCase()}
+          </p>
         </div>
-        <button
-          className={`glass-btn ${editMode ? "glass-btn-primary" : "glass-btn-ghost"}`}
-          style={{ padding: "9px 18px" }}
-          onClick={() => { setEditMode(e => !e); setShowAdd(false); }}
-        >
-          {editMode ? "✓ Done editing" : "✏ Customize"}
-        </button>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+          <RangeSelector value={range} onChange={setRange} />
+          <button
+            className={`glass-btn ${editMode ? "glass-btn-primary" : "glass-btn-ghost"}`}
+            style={{ padding: "9px 18px" }}
+            onClick={() => { setEditMode(e => !e); setShowAdd(false); }}
+          >
+            {editMode ? "✓ Done editing" : "✏ Customize"}
+          </button>
+        </div>
       </div>
 
       {/* Dashboard tabs */}

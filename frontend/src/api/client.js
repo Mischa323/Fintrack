@@ -55,7 +55,7 @@ export const recurring = {
 
 export const stats = {
   overview: (params) => api.get("/stats/overview", { params }).then((r) => r.data),
-  monthly: () => api.get("/stats/monthly").then((r) => r.data),
+  monthly: (params) => api.get("/stats/monthly", { params }).then((r) => r.data),
 };
 
 export const importApi = {
@@ -70,6 +70,17 @@ export const importApi = {
     form.append("accountId", accountId);
     form.append("file", file);
     return api.post("/import/generic", form).then((r) => r.data);
+  },
+  camtInspect: (file) => {
+    const form = new FormData();
+    form.append("file", file);
+    return api.post("/import/camt/inspect", form).then((r) => r.data);
+  },
+  camt: (accountId, file) => {
+    const form = new FormData();
+    form.append("accountId", accountId);
+    form.append("file", file);
+    return api.post("/import/camt", form).then((r) => r.data);
   },
   clear: (accountId, source) =>
     api.delete("/import/clear", { params: { accountId, source } }).then((r) => r.data),

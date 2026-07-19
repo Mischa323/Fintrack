@@ -4,6 +4,7 @@ import GlassCard from "../components/GlassCard";
 
 const STEPS_MAYBE = ["Source", "Accounts", "Transactions"];
 const STEPS_FINTRACK = ["Source", "Restore"];
+const STEPS_ABN = ["Source", "Statement"];
 
 function StepIndicator({ steps, current }) {
   return (
@@ -125,6 +126,13 @@ function StepSource({ onChoose }) {
             title: "Maybe Finance",
             desc: "Import from a Maybe Finance export ZIP. Brings in your accounts, balances and full transaction history.",
             badge: "CSV",
+          },
+          {
+            id: "abn",
+            icon: "🏦",
+            title: "ABN AMRO",
+            desc: "Import a CAMT.053 statement downloaded from ABN AMRO internet banking. Keeps counterparty details and skips duplicates.",
+            badge: "CAMT.053",
           },
           {
             id: "fintrack",
@@ -343,6 +351,119 @@ function StepMaybeTransactions({ onBack }) {
   );
 }
 
+// ── ABN AMRO CAMT.053 statement ──────────────────────────────────────────────
+function StepAbnCamt({ onBack }) {
+  const [accounts, setAccounts] = useState([]);
+  const [accountId, setAccountId] = useState("");
+  const [file, setFile] = useState(null);
+  const [preview, setPreview] = useState(null);
+  const [inspecting, setInspecting] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [result, setResult] = useState(null);
+  const fileRef = useRef();
+
+  useEffect(() => {
+    accountsApi.list().then((a) => { setAccounts(a); if (a[0]) setAccountId(a[0].id); });
+  }, []);
+
+  // Inspect the statement as soon as it is picked, so the user can confirm the
+  // contents and we can preselect the account matching the statement's IBAN.
+  const handleFile = async (f) => {
+    setFile(f);
+    setPreview(null);
+    setResult(null);
+    if (!f) return;
+    setInspecting(true);
+    try {
+      const info = await importApi.camtInspect(f);
+      setPreview(info);
+      if (info.matchedAccount) setAccountId(info.matchedAccount.id);
+    } catch (e) {
+      setResult({ error: true, message: e.response?.data?.error || e.message });
+    } finally {
+      setInspecting(false);
+    }
+  };
+
+  const handleImport = async () => {
+    if (!file || !accountId) return;
+    setLoading(true);
+    setResult(null);
+    try {
+      const res = await importApi.camt(accountId, file);
+      setResult({
+        message: `✓ ${res.imported} transaction${res.imported !== 1 ? "s" : ""} imported`
+          + (res.skipped ? `, ${res.skipped} skipped as duplicates` : ""),
+      });
+    } catch (e) {
+      setResult({ error: true, message: e.response?.data?.error || e.message });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const fmtDate = (d) => (d ? new Date(d).toLocaleDateString() : "?");
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+      <div>
+        <div style={{ fontWeight: 700, fontSize: 17, marginBottom: 6 }}>Import an ABN AMRO statement</div>
+        <div style={{ fontSize: 14, color: "rgba(255,255,255,0.5)", lineHeight: 1.7 }}>
+          In ABN AMRO internet banking go to <strong>Zelf regelen → Downloaden</strong>, choose
+          format <strong>CAMT.053 (XML)</strong>, pick your period and download. Upload that file here.
+          Re-importing the same period is safe — duplicates are skipped automatically.
+        </div>
+      </div>
+
+      <FileDropzone fileRef={fileRef} file={file} onFile={handleFile} accept=".xml" label="Drop your CAMT.053 .xml file here" />
+
+      {inspecting && (
+        <div style={{ fontSize: 13, color: "rgba(255,255,255,0.4)" }}>Reading statement…</div>
+      )}
+
+      {preview && (
+        <div style={{
+          borderRadius: 12, padding: "14px 18px", fontSize: 13, lineHeight: 1.8,
+          background: "rgba(99,102,241,0.08)", border: "1px solid rgba(129,140,248,0.25)",
+        }}>
+          <div style={{ fontWeight: 600, color: "#c7d2fe", marginBottom: 4 }}>Statement contents</div>
+          <div style={{ color: "rgba(255,255,255,0.6)" }}>
+            <div>{preview.count} transaction{preview.count !== 1 ? "s" : ""} · {fmtDate(preview.from)} → {fmtDate(preview.to)}</div>
+            {preview.iban && <div>Account: {preview.iban}{preview.currency ? ` (${preview.currency})` : ""}</div>}
+            {preview.matchedAccount
+              ? <div style={{ color: "#6ee7b7" }}>Matched to “{preview.matchedAccount.name}” by IBAN</div>
+              : preview.iban && <div style={{ color: "#fbbf24" }}>No account has this IBAN — pick the target below</div>}
+          </div>
+        </div>
+      )}
+
+      <div>
+        <div style={{ fontSize: 13, color: "rgba(255,255,255,0.5)", marginBottom: 6 }}>Target Account</div>
+        <select className="glass-input" style={{ padding: "10px 14px", width: "100%" }} value={accountId} onChange={(e) => setAccountId(e.target.value)}>
+          {accounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+        </select>
+        <div style={{ fontSize: 12, color: "rgba(255,255,255,0.35)", marginTop: 6 }}>
+          Tip: set the IBAN on your account and it will be matched automatically next time.
+        </div>
+      </div>
+
+      <ResultBanner result={result} onDismiss={() => setResult(null)} />
+
+      <div style={{ display: "flex", gap: 10 }}>
+        <button className="glass-btn" style={{ padding: "11px 20px" }} onClick={onBack}>← Back</button>
+        <button
+          className="glass-btn glass-btn-primary"
+          style={{ flex: 1, padding: "11px 20px", opacity: (!file || !accountId || loading || inspecting) ? 0.5 : 1 }}
+          onClick={handleImport}
+          disabled={!file || !accountId || loading || inspecting}
+        >
+          {loading ? "Importing…" : "Import Statement"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // ── FinTrack backup restore ──────────────────────────────────────────────────
 function StepRestore({ onBack }) {
   const [file, setFile] = useState(null);
@@ -434,7 +555,10 @@ export default function Import() {
   const [source, setSource] = useState(null); // "maybe" | "fintrack"
   const [step, setStep] = useState(0);
 
-  const steps = source === "fintrack" ? STEPS_FINTRACK : source === "maybe" ? STEPS_MAYBE : ["Source"];
+  const steps = source === "fintrack" ? STEPS_FINTRACK
+    : source === "abn" ? STEPS_ABN
+    : source === "maybe" ? STEPS_MAYBE
+    : ["Source"];
 
   const chooseSource = (s) => { setSource(s); setStep(1); };
   const back = () => { if (step === 1) { setSource(null); setStep(0); } else setStep((s) => s - 1); };
@@ -452,6 +576,7 @@ export default function Import() {
         {step === 0 && <StepSource onChoose={chooseSource} />}
         {source === "maybe" && step === 1 && <StepMaybeAccounts onDone={() => setStep(2)} onBack={back} />}
         {source === "maybe" && step === 2 && <StepMaybeTransactions onBack={back} />}
+        {source === "abn" && step === 1 && <StepAbnCamt onBack={back} />}
         {source === "fintrack" && step === 1 && <StepRestore onBack={back} />}
       </GlassCard>
     </div>

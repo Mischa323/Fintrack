@@ -4,6 +4,8 @@ const { parse } = require("csv-parse");
 const { PrismaClient } = require("@prisma/client");
 const fs = require("fs");
 const path = require("path");
+const { parseCamt053 } = require("../services/camt053");
+const { persistRows } = require("../services/importTransactions");
 
 const router = express.Router();
 const prisma = new PrismaClient();
@@ -111,6 +113,56 @@ router.post("/generic", upload.single("file"), async (req, res) => {
   res.json(results);
 });
 
+// Inspect a CAMT.053 file without importing it, so the UI can show what is in
+// the statement and preselect the matching account by IBAN.
+router.post("/camt/inspect", upload.single("file"), async (req, res) => {
+  if (!req.file) return res.status(400).json({ error: "CAMT.053 XML file required" });
+
+  let parsed;
+  try {
+    parsed = parseCamt053(fs.readFileSync(req.file.path, "utf8"));
+  } catch (err) {
+    return res.status(400).json({ error: err.message });
+  } finally {
+    fs.unlinkSync(req.file.path);
+  }
+
+  const dates = parsed.entries.map((e) => e.date).sort((a, b) => a - b);
+  const match = parsed.iban
+    ? await prisma.account.findFirst({
+        where: { iban: parsed.iban },
+        select: { id: true, name: true },
+      })
+    : null;
+
+  res.json({
+    iban: parsed.iban,
+    currency: parsed.currency,
+    count: parsed.entries.length,
+    from: dates[0] || null,
+    to: dates[dates.length - 1] || null,
+    matchedAccount: match,
+  });
+});
+
+router.post("/camt", upload.single("file"), async (req, res) => {
+  const { accountId } = req.body;
+  if (!accountId) return res.status(400).json({ error: "accountId required" });
+  if (!req.file) return res.status(400).json({ error: "CAMT.053 XML file required" });
+
+  let parsed;
+  try {
+    parsed = parseCamt053(fs.readFileSync(req.file.path, "utf8"));
+  } catch (err) {
+    return res.status(400).json({ error: err.message });
+  } finally {
+    fs.unlinkSync(req.file.path);
+  }
+
+  const results = await persistRows(parsed.entries, accountId, "camt053");
+  res.json({ ...results, iban: parsed.iban, currency: parsed.currency });
+});
+
 async function importCsv(filePath, accountId, rowParser, source) {
   const content = fs.readFileSync(filePath, "utf8");
 
@@ -124,7 +176,7 @@ async function importCsv(filePath, accountId, rowParser, source) {
   let skipped = 0;
   const errors = [];
 
-  // 1. Parse every row up front
+  // Parse every row up front
   const parsedRows = [];
   for (const row of rows) {
     try {
@@ -140,74 +192,9 @@ async function importCsv(filePath, accountId, rowParser, source) {
     }
   }
 
-  // 2. Resolve every category in one pass instead of a query per row
-  const categoryIdByName = new Map();
-  const existingCategories = await prisma.category.findMany({ select: { id: true, name: true } });
-  for (const c of existingCategories) categoryIdByName.set(c.name.toLowerCase(), c.id);
-
-  const wantedNames = [...new Set(parsedRows.map((p) => p.categoryName).filter(Boolean))];
-  for (const name of wantedNames) {
-    if (categoryIdByName.has(name.toLowerCase())) continue;
-    const created = await prisma.category.create({ data: { name, color: "#6b7280" } });
-    categoryIdByName.set(name.toLowerCase(), created.id);
-  }
-
-  // 3. Fetch already-imported externalIds in one query instead of a lookup per row
-  const externalIds = parsedRows.map((p) => p.externalId).filter(Boolean);
-  const seenExternalIds = new Set();
-  if (externalIds.length > 0) {
-    const existing = await prisma.transaction.findMany({
-      where: { accountId, externalId: { in: externalIds } },
-      select: { externalId: true },
-    });
-    for (const t of existing) seenExternalIds.add(t.externalId);
-  }
-
-  const toCreate = [];
-  for (const p of parsedRows) {
-    // Skip rows already imported, and duplicates within the file itself
-    if (p.externalId) {
-      if (seenExternalIds.has(p.externalId)) { skipped++; continue; }
-      seenExternalIds.add(p.externalId);
-    }
-    toCreate.push({
-      accountId,
-      categoryId: p.categoryName ? categoryIdByName.get(p.categoryName.toLowerCase()) ?? null : null,
-      amount: p.amount,
-      description: p.description,
-      date: p.date,
-      type: p.type,
-      notes: p.notes,
-      importedFrom: source,
-      externalId: p.externalId || null,
-    });
-  }
-
-  // 4. Insert in batched transactions — one commit per chunk rather than per row,
-  //    which is what made large imports slow enough to time out.
-  let imported = 0;
-  const CHUNK_SIZE = 200;
-  for (let i = 0; i < toCreate.length; i += CHUNK_SIZE) {
-    const chunk = toCreate.slice(i, i + CHUNK_SIZE);
-    try {
-      await prisma.$transaction(chunk.map((data) => prisma.transaction.create({ data })));
-      imported += chunk.length;
-    } catch (err) {
-      // Fall back to per-row inserts so one bad row cannot fail the whole chunk
-      for (const data of chunk) {
-        try {
-          await prisma.transaction.create({ data });
-          imported++;
-        } catch (rowErr) {
-          errors.push(rowErr.message);
-          skipped++;
-        }
-      }
-    }
-  }
-
-  return { imported, skipped, errors: errors.slice(0, 10) };
+  return persistRows(parsedRows, accountId, source, { skipped, errors });
 }
+
 
 router.delete("/clear", async (req, res) => {
   const { accountId, source } = req.query;

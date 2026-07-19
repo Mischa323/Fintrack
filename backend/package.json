@@ -1,6 +1,6 @@
 {
   "name": "finance-tracker-backend",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "type": "commonjs",
   "scripts": {
     "postinstall": "prisma generate && prisma migrate deploy",
@@ -21,6 +21,7 @@
     "express": "^4.19.2",
     "express-async-errors": "^3.1.1",
     "express-session": "^1.19.0",
+    "fast-xml-parser": "^5.10.1",
     "googleapis": "^144.0.0",
     "jsonwebtoken": "^9.0.3",
     "multer": "^1.4.5-lts.1",

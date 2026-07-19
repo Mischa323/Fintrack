@@ -88,7 +88,7 @@ To actually get Watchtower auto-updates, images must be published (GitHub Action
 
 `backend/package.json` `version` is the **single source of truth** — bump it on
 every meaningful change (keep `frontend/package.json` in sync for tidiness).
-Currently **1.1.0**.
+Currently **1.2.0**.
 
 - `GET /version` → `{ version, buildTime }` (authenticated)
 - `GET /version/check` → compares against the `version` in `backend/package.json`
@@ -139,14 +139,40 @@ step 2. Changing the secret invalidates existing sessions.
 - Import logic (`backend/src/routes/import.js`) upserts on that key. It does **not**
   recalculate account balance; `POST /accounts/:id/recalculate` does that.
 
+## Dashboard time range
+
+The dashboard defaults to **this year**, with a selector for This year / 1 / 2 /
+5 years / All time. The choice persists in `localStorage` (`fintrack_dashboard_range`).
+
+- `GET /stats/overview?from=&to=` and `GET /stats/monthly?from=&to=` both accept the range
+- `/stats/monthly` buckets **by month** for spans up to 24 months and **by year**
+  beyond that, so a 5-year view renders ~5 bars rather than 60. The bucket label
+  is returned as `month` either way, which is what the chart's `dataKey` expects.
+- Range boundaries are anchored to **UTC midnight** (`Date.UTC`) because
+  transaction dates are stored date-only in UTC; a local-midnight boundary
+  silently pulled in the previous year's final day.
+- "Total Balance" is deliberately *not* range-filtered — it is the accounts'
+  current balance, not a sum over the period.
+
 ## ABN AMRO bank sync — plan
 
 Goal: sync ABN AMRO transactions into FinTrack. Approaches evaluated:
 
-- **File import (chosen first — "Phase 1"):** parse ABN AMRO **CAMT.053 (XML)** (or
-  CSV) exports through the existing import upsert path. No third party, fully local,
-  manual download+upload. CAMT.053 gives structured counterparty IBAN/name, a stable
-  reference for `externalId`, and signed amounts.
+- **Phase 1 — CAMT.053 file import: DONE (v1.2.0).**
+  - `backend/src/services/camt053.js` parses the statement; `services/importTransactions.js`
+    holds the shared persistence used by every import source.
+  - Routes: `POST /import/camt` (import) and `POST /import/camt/inspect` (preview
+    the statement and match an account by IBAN before importing).
+  - `externalId` prefers the bank's own reference (`AcctSvcrRef` → `TxId` →
+    `EndToEndId` → `NtryRef`), rejecting placeholders like `NOTPROVIDED`. When none
+    exists it derives a deterministic hash of the entry content plus an occurrence
+    counter — so re-importing the same statement skips, while genuinely identical
+    entries in one file remain distinct.
+  - `CdtDbtInd` maps `CRDT`→INCOME / `DBIT`→EXPENSE; the counterparty is the
+    creditor for outgoing and the debtor for incoming. Pending (`PDNG`) entries
+    are skipped.
+  - UI: "ABN AMRO" card in the Import wizard. Download from ABN AMRO internet
+    banking via **Zelf regelen → Downloaden**, format **CAMT.053 (XML)**.
 - **GoCardless Bank Account Data (ex-Nordigen) auto-sync ("Phase 2"):** free tier,
   regulated AISP, supports ABN AMRO (NL). User consents via the bank; backend pulls
   on a schedule (reuse the cron pattern in `backend/src/services/backupService.js`).
@@ -154,7 +180,8 @@ Goal: sync ABN AMRO transactions into FinTrack. Approaches evaluated:
 - ABN AMRO's own PSD2 API directly requires a licensed TPP + eIDAS QWAC — not viable
   for a personal project (sandbox only).
 
-**Status:** Phase 1 (CAMT.053 import) is the next task. Deployment is working.
+**Status:** Phase 1 shipped in v1.2.0. Phase 2 (GoCardless auto-sync) not started;
+it should reuse `persistRows` from `services/importTransactions.js`.
 
 ## Conventions
 
