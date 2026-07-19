@@ -88,7 +88,7 @@ To actually get Watchtower auto-updates, images must be published (GitHub Action
 
 `backend/package.json` `version` is the **single source of truth** — bump it on
 every meaningful change (keep `frontend/package.json` in sync for tidiness).
-Currently **1.3.0**.
+Currently **1.4.0**.
 
 - `GET /version` → `{ version, buildTime }` (authenticated)
 - `GET /version/check` → compares against the `version` in `backend/package.json`
@@ -129,6 +129,24 @@ step 2. Changing the secret invalidates existing sessions.
   SQLite commit each made imports exceed nginx's 60s timeout. Now: categories
   resolved via one map, existing `externalId`s fetched in one query, inserts
   batched 200-per-transaction. nginx proxy timeouts raised to 300s.
+
+## Merging categories
+
+Imports create a category per name encountered, so near-duplicates accumulate
+("Groceries" / "Boodschappen"). `POST /categories/merge { sourceIds, targetId }`
+folds them together; `GET /categories/flat` lists every category with usage
+counts for the picker.
+
+Order inside the transaction matters:
+1. **Detach the target first** if it sits under a source — otherwise the
+   reparent below sets its `parentId` to itself and corrupts the tree
+   (verified: without this guard `parentId === id`).
+2. Reparent the sources' sub-categories to the target.
+3. Repoint transactions and recurring transactions to the target.
+4. Delete the sources.
+
+Nothing is left uncategorised — unlike `DELETE /categories/:id`, which
+deliberately nulls the category on its transactions.
 
 ## Data model notes (for bank sync)
 

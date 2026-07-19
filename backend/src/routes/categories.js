@@ -13,6 +13,67 @@ router.get("/", async (req, res) => {
   res.json(categories);
 });
 
+// GET /categories/flat — every category, with how much each one is used.
+// Declared before "/:id" routes so the literal path wins.
+router.get("/flat", async (req, res) => {
+  const categories = await prisma.category.findMany({
+    orderBy: { name: "asc" },
+    include: {
+      _count: { select: { transactions: true, recurring: true, children: true } },
+      parent: { select: { id: true, name: true } },
+    },
+  });
+  res.json(categories);
+});
+
+// POST /categories/merge — fold one or more categories into another.
+// Everything pointing at a source is repointed at the target, then the sources
+// are removed. Nothing is left uncategorised.
+router.post("/merge", async (req, res) => {
+  const { sourceIds, targetId } = req.body;
+  if (!targetId) return res.status(400).json({ error: "targetId required" });
+
+  const sources = (Array.isArray(sourceIds) ? sourceIds : []).filter((id) => id && id !== targetId);
+  if (sources.length === 0) {
+    return res.status(400).json({ error: "Select at least one category to merge into the target" });
+  }
+
+  const target = await prisma.category.findUnique({ where: { id: targetId } });
+  if (!target) return res.status(404).json({ error: "Target category not found" });
+
+  const found = await prisma.category.findMany({
+    where: { id: { in: sources } },
+    select: { id: true, name: true },
+  });
+  if (found.length === 0) return res.status(404).json({ error: "No matching categories to merge" });
+  const ids = found.map((c) => c.id);
+
+  const movedTransactions = await prisma.transaction.count({ where: { categoryId: { in: ids } } });
+  const movedRecurring = await prisma.recurringTransaction.count({ where: { categoryId: { in: ids } } });
+
+  await prisma.$transaction([
+    // Detach the target first if it sits under a category being merged away,
+    // otherwise the reparent below would make it its own parent.
+    prisma.category.updateMany({
+      where: { id: targetId, parentId: { in: ids } },
+      data: { parentId: null },
+    }),
+    // Sub-categories of the merged categories move under the target
+    prisma.category.updateMany({ where: { parentId: { in: ids } }, data: { parentId: targetId } }),
+    prisma.transaction.updateMany({ where: { categoryId: { in: ids } }, data: { categoryId: targetId } }),
+    prisma.recurringTransaction.updateMany({ where: { categoryId: { in: ids } }, data: { categoryId: targetId } }),
+    prisma.category.deleteMany({ where: { id: { in: ids } } }),
+  ]);
+
+  res.json({
+    merged: ids.length,
+    mergedNames: found.map((c) => c.name),
+    target: target.name,
+    movedTransactions,
+    movedRecurring,
+  });
+});
+
 router.post("/", async (req, res) => {
   const { name, color, icon, parentId } = req.body;
   const category = await prisma.category.create({

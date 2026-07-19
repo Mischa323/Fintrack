@@ -44,6 +44,9 @@ export const categories = {
   update: (id, data) => api.put(`/categories/${id}`, data).then((r) => r.data),
   remove: (id) => api.delete(`/categories/${id}`),
   seed: () => api.post("/categories/seed").then((r) => r.data),
+  flat: () => api.get("/categories/flat").then((r) => r.data),
+  merge: (sourceIds, targetId) =>
+    api.post("/categories/merge", { sourceIds, targetId }).then((r) => r.data),
 };
 
 export const recurring = {
