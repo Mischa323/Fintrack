@@ -8,13 +8,13 @@
 # The frontend image serves the SPA and proxies /api to the backend, so no separate
 # nginx service (and no config bind-mount, which the web editor cannot provide).
 #
-# NOTE: builds pull from GitHub `master` — push your changes before redeploying.
+# NOTE: builds pull from GitHub `main` — push your changes before redeploying.
 # To update later: Portainer → the stack → "Update the stack" with re-pull enabled.
 
 services:
   backend:
     build:
-      context: https://github.com/Mischa323/Fintrack.git#master:backend
+      context: https://github.com/Mischa323/Fintrack.git#main:backend
     container_name: finance-backend
     restart: unless-stopped
     environment:
@@ -30,7 +30,7 @@ services:
 
   frontend:
     build:
-      context: https://github.com/Mischa323/Fintrack.git#master:frontend
+      context: https://github.com/Mischa323/Fintrack.git#main:frontend
       args:
         VITE_API_URL: /api
     container_name: finance-frontend

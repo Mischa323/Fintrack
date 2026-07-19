@@ -7,7 +7,7 @@ const pkg = require("../../package.json");
 
 // Version of the newest published code, read straight from the repo.
 const LATEST_URL =
-  "https://raw.githubusercontent.com/Mischa323/Fintrack/master/backend/package.json";
+  "https://raw.githubusercontent.com/Mischa323/Fintrack/main/backend/package.json";
 
 // Written at image build time by the Dockerfile; absent in local dev.
 function readBuildTime() {

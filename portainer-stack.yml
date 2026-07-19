@@ -1,7 +1,7 @@
 # FinTrack — Portainer stack
 # Deploy via Portainer → Stacks → Add stack → "Repository"
 #   Repository URL:  https://github.com/Mischa323/fintrack
-#   Reference:       refs/heads/master
+#   Reference:       refs/heads/main
 #   Compose path:    portainer-stack.yml
 # Then set the environment variables below in Portainer's "Environment variables" section.
 #

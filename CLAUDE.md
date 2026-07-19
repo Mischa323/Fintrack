@@ -15,7 +15,7 @@ categories, recurring transactions, goals, backups, CSV import, and optional SSO
 ## Repository
 
 - GitHub: `https://github.com/Mischa323/Fintrack` (renamed from `fintrack`; the
-  lowercase URL still redirects). Default branch: `master`.
+  lowercase URL still redirects). Default branch: `main`.
 
 ## Layout
 
@@ -54,7 +54,7 @@ DB helpers: `npm run db:migrate`, `npm run db:seed`, `npm run db:studio`.
 
 Deployed by pasting `portainer-stack-webeditor.yml` into Portainer → Stacks →
 Add stack → **Web editor**. It works without local source because the build
-contexts are **remote git URLs** (`context: https://github.com/...#master:backend`),
+contexts are **remote git URLs** (`context: https://github.com/...#main:backend`),
 so Docker clones and builds the repo itself. No registry, no CI.
 
 Two services only — the frontend image serves the SPA *and* proxies `/api` to the
@@ -69,7 +69,7 @@ bind-mount is not possible from the web editor).
   first-run screen to create the admin account.
 
 ### Updating a deployment
-Push to `master`, then Portainer → the stack → **Update the stack** with rebuild
+Push to `main`, then Portainer → the stack → **Update the stack** with rebuild
 enabled. It does *not* auto-deploy on push. If a redeploy appears to run old code,
 Portainer likely reused a cached image — delete the stack (volumes survive) and
 prune unused images to force a genuine rebuild.
@@ -92,7 +92,7 @@ Currently **1.2.0**.
 
 - `GET /version` → `{ version, buildTime }` (authenticated)
 - `GET /version/check` → compares against the `version` in `backend/package.json`
-  on `master` via raw.githubusercontent.com, returns `{ current, latest, updateAvailable }`
+  on `main` via raw.githubusercontent.com, returns `{ current, latest, updateAvailable }`
 - Settings page shows `FinTrack v<version> · built <time>` with a
   **Check for updates** button
 - `BUILD_TIME` is written by the Dockerfile at image build time (after the source
