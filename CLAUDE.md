@@ -88,7 +88,7 @@ To actually get Watchtower auto-updates, images must be published (GitHub Action
 
 `backend/package.json` `version` is the **single source of truth** — bump it on
 every meaningful change (keep `frontend/package.json` in sync for tidiness).
-Currently **1.4.0**.
+Currently **1.5.0**.
 
 - `GET /version` → `{ version, buildTime }` (authenticated)
 - `GET /version/check` → compares against the `version` in `backend/package.json`
@@ -129,6 +129,20 @@ step 2. Changing the secret invalidates existing sessions.
   SQLite commit each made imports exceed nginx's 60s timeout. Now: categories
   resolved via one map, existing `externalId`s fetched in one query, inserts
   batched 200-per-transaction. nginx proxy timeouts raised to 300s.
+
+## Bulk transaction actions
+
+`POST /transactions/bulk-delete { ids }` and `PATCH /transactions/bulk
+{ ids, categoryId?, type?, notes? }`.
+
+- Balances are corrected **once per account** (`collectAdjustments` builds a net
+  delta map) rather than once per row.
+- Bulk `type` accepts INCOME/EXPENSE only; TRANSFER rows are left untouched and
+  reported as `skippedTransfers`, because a transfer's direction depends on
+  `toAccountId` and cannot be inferred in bulk.
+- Amount and date are deliberately not bulk-editable.
+- The UI clears the selection whenever the visible rows change, so a selection
+  hidden by a filter or page change can never be acted on by mistake.
 
 ## Merging categories
 

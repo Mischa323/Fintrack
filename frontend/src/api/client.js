@@ -36,6 +36,9 @@ export const transactions = {
   create: (data) => api.post("/transactions", data).then((r) => r.data),
   update: (id, data) => api.put(`/transactions/${id}`, data).then((r) => r.data),
   remove: (id) => api.delete(`/transactions/${id}`),
+  bulkRemove: (ids) => api.post("/transactions/bulk-delete", { ids }).then((r) => r.data),
+  bulkUpdate: (ids, changes) =>
+    api.patch("/transactions/bulk", { ids, ...changes }).then((r) => r.data),
 };
 
 export const categories = {

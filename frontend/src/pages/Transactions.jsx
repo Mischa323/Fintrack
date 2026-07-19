@@ -25,6 +25,9 @@ export default function Transactions() {
   const [editing, setEditing] = useState(null);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
+  const [selected, setSelected] = useState([]);
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [bulkMsg, setBulkMsg] = useState(null);
   const [searchParams] = useSearchParams();
   const [filters, setFilters] = useState({ search: "", accountId: searchParams.get("accountId") || "", categoryId: "", type: "", page: 1 });
 
@@ -82,6 +85,56 @@ export default function Transactions() {
     load();
   };
 
+  // ── Bulk selection ────────────────────────────────────────────
+  // Selection is cleared whenever the visible rows change, so a hidden
+  // selection can never be acted on by mistake.
+  useEffect(() => { setSelected([]); setBulkMsg(null); }, [data.transactions]);
+
+  const visibleIds = data.transactions.map((t) => t.id);
+  const allSelected = visibleIds.length > 0 && visibleIds.every((id) => selected.includes(id));
+  const toggleRow = (id) =>
+    setSelected((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]));
+  const toggleAll = () => setSelected(allSelected ? [] : visibleIds);
+
+  const runBulk = async (fn, describe) => {
+    setBulkBusy(true);
+    setBulkMsg(null);
+    try {
+      const res = await fn();
+      setBulkMsg({ text: describe(res) });
+      setSelected([]);
+      load();
+      accountsApi.list().then(setAccounts); // balances changed
+    } catch (err) {
+      setBulkMsg({ error: true, text: err.response?.data?.error || err.message });
+    } finally {
+      setBulkBusy(false);
+    }
+  };
+
+  const bulkDelete = () => {
+    if (!confirm(`Delete ${selected.length} transaction${selected.length === 1 ? "" : "s"}? Account balances are corrected. This cannot be undone.`)) return;
+    runBulk(
+      () => txApi.bulkRemove(selected),
+      (r) => `${r.deleted} transaction${r.deleted === 1 ? "" : "s"} deleted`
+    );
+  };
+
+  const bulkCategory = (categoryId) =>
+    runBulk(
+      () => txApi.bulkUpdate(selected, { categoryId: categoryId || null }),
+      (r) => categoryId
+        ? `${r.updated} transaction${r.updated === 1 ? "" : "s"} recategorized`
+        : `Category cleared on ${r.updated} transaction${r.updated === 1 ? "" : "s"}`
+    );
+
+  const bulkType = (type) =>
+    runBulk(
+      () => txApi.bulkUpdate(selected, { type }),
+      (r) => `${r.updated} changed to ${type.toLowerCase()}`
+        + (r.skippedTransfers ? ` — ${r.skippedTransfers} transfer${r.skippedTransfers === 1 ? "" : "s"} left unchanged` : "")
+    );
+
   const allCategories = categories.flatMap((c) => [c, ...(c.children || [])]);
   const isTransfer = form.type === "TRANSFER";
 
@@ -116,11 +169,76 @@ export default function Transactions() {
         </div>
       </GlassCard>
 
+      {/* Bulk action bar */}
+      {(selected.length > 0 || bulkMsg) && (
+        <GlassCard style={{ padding: "12px 16px" }}>
+          {bulkMsg && (
+            <div style={{ fontSize: 13, marginBottom: selected.length ? 10 : 0, color: bulkMsg.error ? "#f87171" : "#34d399" }}>
+              {bulkMsg.error ? "" : "✓ "}{bulkMsg.text}
+            </div>
+          )}
+          {selected.length > 0 && (
+            <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+              <span style={{ fontSize: 14, fontWeight: 600, whiteSpace: "nowrap" }}>
+                {selected.length} selected
+              </span>
+              <button className="glass-btn glass-btn-ghost" style={{ padding: "6px 12px", fontSize: 13 }} onClick={() => setSelected([])} disabled={bulkBusy}>
+                Clear
+              </button>
+
+              <span style={{ width: 1, height: 22, background: "rgba(255,255,255,0.1)" }} />
+
+              <select
+                className="glass-input"
+                style={{ padding: "6px 10px", fontSize: 13 }}
+                value=""
+                disabled={bulkBusy}
+                onChange={(e) => { if (e.target.value !== "") bulkCategory(e.target.value === "__none__" ? "" : e.target.value); }}
+              >
+                <option value="">Set category…</option>
+                <option value="__none__">— No category —</option>
+                {allCategories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </select>
+
+              <select
+                className="glass-input"
+                style={{ padding: "6px 10px", fontSize: 13 }}
+                value=""
+                disabled={bulkBusy}
+                onChange={(e) => { if (e.target.value) bulkType(e.target.value); }}
+              >
+                <option value="">Set type…</option>
+                <option value="EXPENSE">Expense</option>
+                <option value="INCOME">Income</option>
+              </select>
+
+              <button
+                className="glass-btn glass-btn-danger"
+                style={{ padding: "6px 14px", fontSize: 13, marginLeft: "auto" }}
+                onClick={bulkDelete}
+                disabled={bulkBusy}
+              >
+                {bulkBusy ? "Working…" : `Delete ${selected.length}`}
+              </button>
+            </div>
+          )}
+        </GlassCard>
+      )}
+
       {/* Table */}
       <GlassCard style={{ padding: 0, overflow: "hidden" }}>
         <table style={{ width: "100%", borderCollapse: "collapse" }}>
           <thead>
             <tr style={{ borderBottom: "1px solid rgba(255,255,255,0.08)" }}>
+              <th style={{ padding: "14px 8px 14px 16px", width: 32 }}>
+                <input
+                  type="checkbox"
+                  checked={allSelected}
+                  onChange={toggleAll}
+                  title={allSelected ? "Deselect all" : "Select all on this page"}
+                  style={{ cursor: "pointer" }}
+                />
+              </th>
               {["Date", "Description", "Account", "Category", "Type", "Amount", ""].map((h) => (
                 <th key={h} style={{ padding: "14px 16px", textAlign: h === "Amount" ? "right" : "left", fontSize: 12, color: "rgba(255,255,255,0.4)", fontWeight: 600, whiteSpace: "nowrap" }}>{h}</th>
               ))}
@@ -128,7 +246,21 @@ export default function Transactions() {
           </thead>
           <tbody>
             {data.transactions.map((t) => (
-              <tr key={t.id} style={{ borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
+              <tr
+                key={t.id}
+                style={{
+                  borderBottom: "1px solid rgba(255,255,255,0.04)",
+                  background: selected.includes(t.id) ? "rgba(99,102,241,0.12)" : undefined,
+                }}
+              >
+                <td style={{ padding: "12px 8px 12px 16px" }}>
+                  <input
+                    type="checkbox"
+                    checked={selected.includes(t.id)}
+                    onChange={() => toggleRow(t.id)}
+                    style={{ cursor: "pointer" }}
+                  />
+                </td>
                 <td style={{ padding: "12px 16px", fontSize: 13, color: "rgba(255,255,255,0.5)", whiteSpace: "nowrap" }}>{format(new Date(t.date), "dd MMM yyyy")}</td>
                 <td style={{ padding: "12px 16px", fontSize: 14, fontWeight: 500, maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.description}</td>
                 <td style={{ padding: "12px 16px", fontSize: 13, color: "rgba(255,255,255,0.5)" }}>
@@ -156,7 +288,7 @@ export default function Transactions() {
               </tr>
             ))}
             {data.transactions.length === 0 && (
-              <tr><td colSpan={7} style={{ padding: "60px 16px", textAlign: "center", color: "rgba(255,255,255,0.25)", fontSize: 14 }}>No transactions found</td></tr>
+              <tr><td colSpan={8} style={{ padding: "60px 16px", textAlign: "center", color: "rgba(255,255,255,0.25)", fontSize: 14 }}>No transactions found</td></tr>
             )}
           </tbody>
         </table>

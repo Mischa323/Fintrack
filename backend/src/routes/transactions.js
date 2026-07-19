@@ -39,6 +39,99 @@ router.get("/", async (req, res) => {
   res.json({ transactions, total, page: Number(page), limit: Number(limit) });
 });
 
+// Net balance correction per account, so a bulk action touches each account
+// once instead of once per transaction.
+function collectAdjustments(rows, reverse) {
+  const adjust = new Map();
+  const bump = (accountId, amount) => {
+    if (!accountId) return;
+    adjust.set(accountId, (adjust.get(accountId) || 0) + amount);
+  };
+  const sign = reverse ? -1 : 1;
+  for (const t of rows) {
+    if (t.type === "TRANSFER") {
+      bump(t.accountId, sign * -Number(t.amount));
+      bump(t.toAccountId, sign * Number(t.amount));
+    } else {
+      bump(t.accountId, sign * delta(t.type, t.amount));
+    }
+  }
+  return adjust;
+}
+
+async function applyAdjustments(tx, adjust) {
+  for (const [accountId, amount] of adjust) {
+    if (amount === 0) continue;
+    await tx.account.update({ where: { id: accountId }, data: { balance: { increment: amount } } });
+  }
+}
+
+// POST /transactions/bulk-delete — remove many at once, undoing their balances
+router.post("/bulk-delete", async (req, res) => {
+  const ids = Array.isArray(req.body.ids) ? req.body.ids.filter(Boolean) : [];
+  if (ids.length === 0) return res.status(400).json({ error: "No transactions selected" });
+
+  const result = await prisma.$transaction(async (tx) => {
+    const rows = await tx.transaction.findMany({ where: { id: { in: ids } } });
+    if (rows.length === 0) return { deleted: 0 };
+
+    await applyAdjustments(tx, collectAdjustments(rows, true));
+    await tx.transaction.deleteMany({ where: { id: { in: rows.map((r) => r.id) } } });
+    return { deleted: rows.length };
+  });
+
+  res.json(result);
+});
+
+// PATCH /transactions/bulk — change category, type or notes on many at once.
+// Amount and date are deliberately not bulk-editable.
+router.patch("/bulk", async (req, res) => {
+  const ids = Array.isArray(req.body.ids) ? req.body.ids.filter(Boolean) : [];
+  if (ids.length === 0) return res.status(400).json({ error: "No transactions selected" });
+
+  const { categoryId, type, notes } = req.body;
+  if (type && !["INCOME", "EXPENSE"].includes(type)) {
+    return res.status(400).json({ error: "Bulk type change supports INCOME or EXPENSE only" });
+  }
+
+  const result = await prisma.$transaction(async (tx) => {
+    const rows = await tx.transaction.findMany({ where: { id: { in: ids } } });
+    if (rows.length === 0) return { updated: 0, skippedTransfers: 0 };
+
+    const data = {};
+    if (categoryId !== undefined) data.categoryId = categoryId || null;
+    if (notes !== undefined) data.notes = notes || null;
+
+    // A transfer's direction depends on toAccountId, so it cannot be flipped
+    // to income or expense in bulk — those rows are left untouched.
+    let targets = rows;
+    let skippedTransfers = 0;
+    if (type) {
+      targets = rows.filter((r) => r.type !== "TRANSFER");
+      skippedTransfers = rows.length - targets.length;
+
+      const adjust = new Map();
+      for (const t of targets) {
+        if (t.type === type) continue;
+        const change = delta(type, t.amount) - delta(t.type, t.amount);
+        adjust.set(t.accountId, (adjust.get(t.accountId) || 0) + change);
+      }
+      await applyAdjustments(tx, adjust);
+      data.type = type;
+    }
+
+    if (Object.keys(data).length === 0) return { updated: 0, skippedTransfers };
+
+    const updated = await tx.transaction.updateMany({
+      where: { id: { in: targets.map((t) => t.id) } },
+      data,
+    });
+    return { updated: updated.count, skippedTransfers };
+  });
+
+  res.json(result);
+});
+
 router.post("/", async (req, res) => {
   const { accountId, toAccountId, categoryId, amount, description, date, type, notes } = req.body;
 
