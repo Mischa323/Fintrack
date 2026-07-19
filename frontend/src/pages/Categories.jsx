@@ -17,8 +17,12 @@ function MergeModal({ onClose, onDone }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
   const [filter, setFilter] = useState("");
+  const [acceptDetach, setAcceptDetach] = useState(false);
 
   useEffect(() => { catsApi.flat().then(setAll); }, []);
+
+  // Any change to the selection invalidates a previously given confirmation
+  useEffect(() => { setAcceptDetach(false); }, [targetId, sources.join(",")]);
 
   const toggle = (id) => setSources((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]));
 
@@ -29,8 +33,13 @@ function MergeModal({ onClose, onDone }) {
 
   const visible = all.filter((c) => c.name.toLowerCase().includes(filter.trim().toLowerCase()));
 
+  // The category being kept sits under one that is about to disappear, so it
+  // will be promoted to top-level. Worth an explicit yes rather than a surprise.
+  const willDetachTarget = !!target?.parent && chosen.some((c) => c.id === target.parent.id);
+  const blocked = willDetachTarget && !acceptDetach;
+
   const merge = async () => {
-    if (!targetId || chosen.length === 0) return;
+    if (!targetId || chosen.length === 0 || blocked) return;
     setBusy(true);
     setError(null);
     try {
@@ -115,6 +124,22 @@ function MergeModal({ onClose, onDone }) {
           </div>
         )}
 
+        {willDetachTarget && (
+          <div style={{ marginTop: 12, padding: "12px 14px", borderRadius: 10, background: "rgba(239,68,68,0.1)", border: "1px solid rgba(248,113,113,0.35)", fontSize: 13, lineHeight: 1.6 }}>
+            <div style={{ color: "#f87171", fontWeight: 600, marginBottom: 4 }}>
+              ⚠ “{target.name}” loses its parent category
+            </div>
+            <div style={{ color: "rgba(255,255,255,0.6)" }}>
+              You are merging away “{target.parent.name}”, which “{target.name}” currently sits under.
+              “{target.name}” will become a top-level category. Its transactions are not affected.
+            </div>
+            <label style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 10, color: "#fca5a5", cursor: "pointer" }}>
+              <input type="checkbox" checked={acceptDetach} onChange={(e) => setAcceptDetach(e.target.checked)} />
+              Yes, make “{target.name}” a top-level category
+            </label>
+          </div>
+        )}
+
         {error && (
           <div style={{ marginTop: 12, fontSize: 13, color: "#f87171" }}>{error}</div>
         )}
@@ -123,9 +148,10 @@ function MergeModal({ onClose, onDone }) {
           <button className="glass-btn glass-btn-ghost" style={{ padding: "10px 20px" }} onClick={onClose}>Cancel</button>
           <button
             className="glass-btn glass-btn-primary"
-            style={{ padding: "10px 20px", opacity: (!targetId || chosen.length === 0 || busy) ? 0.5 : 1 }}
+            style={{ padding: "10px 20px", opacity: (!targetId || chosen.length === 0 || busy || blocked) ? 0.5 : 1 }}
             onClick={merge}
-            disabled={!targetId || chosen.length === 0 || busy}
+            disabled={!targetId || chosen.length === 0 || busy || blocked}
+            title={blocked ? "Confirm the parent-category change first" : undefined}
           >
             {busy ? "Merging…" : `Merge ${chosen.length || ""}`.trim()}
           </button>
@@ -201,6 +227,7 @@ export default function Categories() {
           <div>
             ✓ Merged {mergeResult.merged} categor{mergeResult.merged === 1 ? "y" : "ies"} into “{mergeResult.target}”
             {mergeResult.movedTransactions > 0 && ` — ${mergeResult.movedTransactions} transaction${mergeResult.movedTransactions === 1 ? "" : "s"} moved`}
+            {mergeResult.detachedTarget && ` · “${mergeResult.target}” is now a top-level category`}
           </div>
           <button onClick={() => setMergeResult(null)} style={{ background: "none", border: "none", color: "rgba(255,255,255,0.3)", cursor: "pointer", padding: 0, fontSize: 16 }}>×</button>
         </div>

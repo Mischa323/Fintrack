@@ -51,6 +51,10 @@ router.post("/merge", async (req, res) => {
   const movedTransactions = await prisma.transaction.count({ where: { categoryId: { in: ids } } });
   const movedRecurring = await prisma.recurringTransaction.count({ where: { categoryId: { in: ids } } });
 
+  // The target loses its parent when that parent is being merged away, so it
+  // becomes top-level. Reported back so the UI can say so plainly.
+  const detachedTarget = !!target.parentId && ids.includes(target.parentId);
+
   await prisma.$transaction([
     // Detach the target first if it sits under a category being merged away,
     // otherwise the reparent below would make it its own parent.
@@ -71,6 +75,7 @@ router.post("/merge", async (req, res) => {
     target: target.name,
     movedTransactions,
     movedRecurring,
+    detachedTarget,
   });
 });
 
