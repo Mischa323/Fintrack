@@ -113,6 +113,11 @@ export const config = {
   update: (data) => api.put("/config", data).then((r) => r.data),
 };
 
+export const version = {
+  get: () => api.get("/version").then((r) => r.data),
+  check: () => api.get("/version/check").then((r) => r.data),
+};
+
 export const auth = {
   status: () => api.get("/auth/status").then((r) => r.data),
   setup: (password) => api.post("/auth/setup", { password }).then((r) => r.data),

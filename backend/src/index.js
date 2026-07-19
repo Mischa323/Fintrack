@@ -16,6 +16,7 @@ const importRouter = require("./routes/import");
 const statsRouter = require("./routes/stats");
 const goalsRouter = require("./routes/goals");
 const backupRouter = require("./routes/backup");
+const versionRouter = require("./routes/version");
 const { processRecurring } = require("./services/recurringService");
 const { runBackup } = require("./services/backupService");
 const { initJwtSecret } = require("./services/jwtSecret");
@@ -45,6 +46,7 @@ app.use("/import", importRouter);
 app.use("/stats", statsRouter);
 app.use("/goals", goalsRouter);
 app.use("/backup", requireAdmin, backupRouter);
+app.use("/version", versionRouter);
 
 app.get("/health", (_, res) => res.json({ status: "ok" }));
 

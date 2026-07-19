@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import GlassCard from "../components/GlassCard";
 import api from "../api/client";
 import { useAuth } from "../context/AuthContext";
-import { users as usersApi, backup as backupApi } from "../api/client";
+import { users as usersApi, backup as backupApi, version as versionApi } from "../api/client";
 import { useTheme, THEMES } from "../context/ThemeContext";
 
 // ── Help system ───────────────────────────────────────────────
@@ -728,6 +728,65 @@ const NAV_TABS = [
   { id: "backups",    label: "Backups",    icon: "💾", adminOnly: true },
 ];
 
+// ── Version / update check ────────────────────────────────────
+
+function VersionInfo() {
+  const [info, setInfo] = useState(null);
+  const [result, setResult] = useState(null);
+  const [checking, setChecking] = useState(false);
+
+  useEffect(() => {
+    versionApi.get().then(setInfo).catch(() => {});
+  }, []);
+
+  const runCheck = async () => {
+    setChecking(true);
+    setResult(null);
+    try {
+      setResult(await versionApi.check());
+    } catch (e) {
+      setResult({ error: e.response?.data?.error || e.message });
+    } finally {
+      setChecking(false);
+    }
+  };
+
+  if (!info) return null;
+
+  const built = info.buildTime ? new Date(info.buildTime).toLocaleString() : null;
+
+  let message = null;
+  if (result?.error) {
+    message = { text: result.error, color: "#fbbf24" };
+  } else if (result?.updateAvailable) {
+    message = { text: `Update available — v${result.latest} has been published`, color: "#fbbf24" };
+  } else if (result) {
+    message = { text: "You are running the latest version", color: "#34d399" };
+  }
+
+  return (
+    <div style={{
+      display: "flex", alignItems: "center", justifyContent: "space-between",
+      gap: 16, flexWrap: "wrap", marginTop: 18, padding: "0 4px",
+      fontSize: 13, color: "rgba(255,255,255,0.4)",
+    }}>
+      <div>
+        <span style={{ color: "rgba(255,255,255,0.6)", fontWeight: 600 }}>FinTrack v{info.version}</span>
+        {built && <span> · built {built}</span>}
+        {message && <span style={{ color: message.color, marginLeft: 10 }}>{message.text}</span>}
+      </div>
+      <button
+        className="glass-btn"
+        style={{ padding: "6px 14px", fontSize: 13, opacity: checking ? 0.5 : 1 }}
+        onClick={runCheck}
+        disabled={checking}
+      >
+        {checking ? "Checking…" : "Check for updates"}
+      </button>
+    </div>
+  );
+}
+
 export default function Settings() {
   const { user, logout } = useAuth();
   const isAdmin = user?.role === "admin";
@@ -832,6 +891,8 @@ export default function Settings() {
           </>
         )}
       </GlassCard>
+
+      <VersionInfo />
     </div>
   );
 }

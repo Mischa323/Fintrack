@@ -23,6 +23,10 @@ COPY --from=builder /app/prisma ./prisma
 COPY src ./src
 COPY package.json ./
 
+# Record when this image was built so the app can report it. Placed after the
+# source copy so it is refreshed whenever the code changes.
+RUN date -u +"%Y-%m-%dT%H:%M:%SZ" > BUILD_TIME
+
 RUN mkdir -p data uploads
 
 EXPOSE 3001
