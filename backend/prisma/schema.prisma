@@ -1,8 +1,8 @@
 generator client {
   provider      = "prisma-client-js"
-  // Alpine/musl uses OpenSSL 3.x; pin the target so Prisma does not fall back
-  // to an openssl-1.1.x engine that cannot load libssl in the container.
-  binaryTargets = ["native", "linux-musl-openssl-3.0.x"]
+  // Container runs Debian (node:20-slim) with OpenSSL 3.x. Pin the target so
+  // Prisma never falls back to an openssl-1.1.x engine that cannot load libssl.
+  binaryTargets = ["native", "debian-openssl-3.0.x"]
 }
 
 datasource db {

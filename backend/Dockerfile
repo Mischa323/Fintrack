@@ -1,7 +1,10 @@
-FROM node:20-alpine AS builder
+# Debian (glibc + OpenSSL 3) rather than Alpine: Prisma's musl/OpenSSL detection
+# is unreliable and falls back to an openssl-1.1.x engine that cannot load libssl.
+FROM node:20-slim AS builder
 WORKDIR /app
-# Prisma needs OpenSSL present to select the correct engine binary on musl
-RUN apk add --no-cache openssl
+RUN apt-get update -y \
+  && apt-get install -y --no-install-recommends openssl ca-certificates \
+  && rm -rf /var/lib/apt/lists/*
 COPY package*.json ./
 # Skip lifecycle scripts: the postinstall hook runs `prisma generate` (schema not
 # copied yet) and `prisma migrate deploy` (no database at build time). The client
@@ -10,10 +13,11 @@ RUN npm ci --ignore-scripts
 COPY prisma ./prisma
 RUN npx prisma generate
 
-FROM node:20-alpine AS runner
+FROM node:20-slim AS runner
 WORKDIR /app
-# Runtime also needs libssl for the Prisma query/schema engines
-RUN apk add --no-cache openssl
+RUN apt-get update -y \
+  && apt-get install -y --no-install-recommends openssl ca-certificates \
+  && rm -rf /var/lib/apt/lists/*
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/prisma ./prisma
 COPY src ./src
