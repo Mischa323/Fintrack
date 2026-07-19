@@ -71,17 +71,21 @@ export const importApi = {
     form.append("file", file);
     return api.post("/import/generic", form).then((r) => r.data);
   },
-  camtInspect: (file) => {
+  camtInspect: (files) => {
     const form = new FormData();
-    form.append("file", file);
+    for (const f of files) form.append("files", f);
     return api.post("/import/camt/inspect", form).then((r) => r.data);
   },
-  camt: (accountId, file) => {
+  camt: (accountId, files, transferMode) => {
     const form = new FormData();
     form.append("accountId", accountId);
-    form.append("file", file);
+    if (transferMode) form.append("transferMode", transferMode);
+    for (const f of files) form.append("files", f);
     return api.post("/import/camt", form).then((r) => r.data);
   },
+  transferCandidates: () => api.get("/import/transfers/candidates").then((r) => r.data),
+  mergeTransfer: (outgoingId, incomingId) =>
+    api.post("/import/transfers/merge", { outgoingId, incomingId }).then((r) => r.data),
   clear: (accountId, source) =>
     api.delete("/import/clear", { params: { accountId, source } }).then((r) => r.data),
   maybeAccounts: (file) => {

@@ -434,13 +434,13 @@ function UserManagement({ currentUserId }) {
 
 // ── Server Config ─────────────────────────────────────────────
 function ServerConfig() {
-  const [config, setConfig] = useState({ appName: "", defaultCurrency: "", appPort: "", jwtSecret: "" });
+  const [config, setConfig] = useState({ appName: "", defaultCurrency: "", appPort: "", jwtSecret: "", transferDetection: "confirm" });
   const [loaded, setLoaded] = useState(false);
   const [msg, setMsg] = useState(null);
 
   useEffect(() => {
     api.get("/config").then(res => {
-      setConfig({ appName: res.data.appName ?? "FinTrack", defaultCurrency: res.data.defaultCurrency ?? "EUR", appPort: res.data.appPort ?? "", jwtSecret: "" });
+      setConfig({ appName: res.data.appName ?? "FinTrack", defaultCurrency: res.data.defaultCurrency ?? "EUR", appPort: res.data.appPort ?? "", jwtSecret: "", transferDetection: res.data.transferDetection ?? "confirm" });
       setLoaded(true);
     });
   }, []);
@@ -448,7 +448,7 @@ function ServerConfig() {
   async function handleSubmit(e) {
     e.preventDefault(); setMsg(null);
     try {
-      const res = await api.put("/config", { appName: config.appName, defaultCurrency: config.defaultCurrency, appPort: config.appPort ? Number(config.appPort) : undefined, jwtSecret: config.jwtSecret || undefined });
+      const res = await api.put("/config", { appName: config.appName, defaultCurrency: config.defaultCurrency, appPort: config.appPort ? Number(config.appPort) : undefined, jwtSecret: config.jwtSecret || undefined, transferDetection: config.transferDetection });
       setMsg({ type: "success", text: res.data.note || "Configuration saved" });
       setConfig(c => ({ ...c, jwtSecret: "" }));
     } catch (err) { setMsg({ type: "error", text: err.response?.data?.error || "Failed to save config" }); }
@@ -468,7 +468,45 @@ function ServerConfig() {
         <Field label="Server port"><input className="glass-input" style={inp} type="number" value={config.appPort} onChange={e => setConfig(c => ({ ...c, appPort: e.target.value }))} placeholder="3001" /></Field>
         <Field label="JWT secret (leave blank to keep current)" help={GUIDES.jwtSecret}><input className="glass-input" style={inp} type="password" value={config.jwtSecret} onChange={e => setConfig(c => ({ ...c, jwtSecret: e.target.value }))} placeholder="New secret…" /></Field>
       </div>
-      <button type="submit" className="glass-btn glass-btn-primary" style={{ padding: "9px 20px", marginTop: 4 }}>Save configuration</button>
+
+      <div style={{ marginTop: 18, paddingTop: 18, borderTop: "1px solid rgba(255,255,255,0.07)" }}>
+        <div style={{ fontSize: 13, color: "rgba(255,255,255,0.6)", fontWeight: 600, marginBottom: 4 }}>
+          Transfers between your own accounts
+        </div>
+        <div style={{ fontSize: 13, color: "rgba(255,255,255,0.45)", marginBottom: 10, lineHeight: 1.6 }}>
+          Default for bank imports. Moving money between two of your own accounts appears twice in
+          bank data; linking the two sides keeps it out of your income and expense totals.
+          You can still change this per import.
+        </div>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          {[
+            { id: "confirm", label: "Ask me",    desc: "Detect them, I confirm each one" },
+            { id: "auto",    label: "Automatic", desc: "Link them during import" },
+            { id: "off",     label: "Off",       desc: "Keep as income and expense" },
+          ].map(m => {
+            const active = config.transferDetection === m.id;
+            return (
+              <button
+                key={m.id}
+                type="button"
+                onClick={() => setConfig(c => ({ ...c, transferDetection: m.id }))}
+                style={{
+                  flex: "1 1 140px", padding: "10px 12px", borderRadius: 10, cursor: "pointer",
+                  textAlign: "left", fontSize: 13,
+                  border: `1px solid ${active ? "rgba(129,140,248,0.6)" : "rgba(255,255,255,0.1)"}`,
+                  background: active ? "rgba(99,102,241,0.18)" : "rgba(255,255,255,0.03)",
+                  color: active ? "#c7d2fe" : "rgba(255,255,255,0.55)",
+                }}
+              >
+                <div style={{ fontWeight: 600 }}>{m.label}</div>
+                <div style={{ fontSize: 11, opacity: 0.75, marginTop: 2 }}>{m.desc}</div>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      <button type="submit" className="glass-btn glass-btn-primary" style={{ padding: "9px 20px", marginTop: 16 }}>Save configuration</button>
     </form>
   );
 }

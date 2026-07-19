@@ -88,7 +88,7 @@ To actually get Watchtower auto-updates, images must be published (GitHub Action
 
 `backend/package.json` `version` is the **single source of truth** — bump it on
 every meaningful change (keep `frontend/package.json` in sync for tidiness).
-Currently **1.2.0**.
+Currently **1.3.0**.
 
 - `GET /version` → `{ version, buildTime }` (authenticated)
 - `GET /version/check` → compares against the `version` in `backend/package.json`
@@ -171,8 +171,43 @@ Goal: sync ABN AMRO transactions into FinTrack. Approaches evaluated:
   - `CdtDbtInd` maps `CRDT`→INCOME / `DBIT`→EXPENSE; the counterparty is the
     creditor for outgoing and the debtor for incoming. Pending (`PDNG`) entries
     are skipped.
-  - UI: "ABN AMRO" card in the Import wizard. Download from ABN AMRO internet
-    banking via **Zelf regelen → Downloaden**, format **CAMT.053 (XML)**.
+  - UI: "ABN AMRO" card in the Import wizard. The real download path is
+    **Zelf regelen → Overzichten en afschriften → Bij- en afschrijvingen
+    downloaden**, file type **CAMT.053 (XML)**.
+  - **Multi-file:** ABN issues one small file per day, so `/import/camt` and
+    `/import/camt/inspect` take `files[]` (up to 400) and merge them into one
+    import. Files covering more than one IBAN are rejected rather than mixed
+    into a single account.
+  - **IBAN matching is normalised** (`services/iban.js`): spaces/dashes stripped
+    and uppercased on save and on compare, because an IBAN copied from the bank
+    ("NL69 ABNA 0624 4857 06") never matched the CAMT form. Existing rows were
+    normalised by the migration; comparison happens in JS so legacy rows match.
+
+## Transfers between own accounts
+
+A transfer appears twice in bank data (out of A, into B). FinTrack stores it as
+ONE row: `accountId` (from) → `toAccountId` (to), and `/stats` counts only
+INCOME/EXPENSE, so a linked transfer correctly stays out of income and expense.
+
+`services/transfers.js` implements three modes, default in
+`Settings.transferDetection`, overridable per import via `transferMode`:
+
+| Mode | Behaviour |
+|---|---|
+| `off` | Everything stays INCOME/EXPENSE |
+| `auto` | Matching entries become TRANSFER rows during import |
+| `confirm` (default) | Import normally, then surface candidate pairs to merge |
+
+- Matching uses the counterparty IBAN against accounts' IBANs, amount, and a
+  **±4 day** window (`MATCH_WINDOW_DAYS`).
+- In `auto`, the mirror leg is skipped when a matching TRANSFER already exists
+  (`mirrorLegExists`) or was created earlier in the same batch — this is what
+  stops the two statements of one transfer double-counting.
+- `persistRows` dedups on `externalId` matching **either** `accountId` or
+  `toAccountId`, because a transfer detected from one side is stored under the
+  paying account but still represents the other statement's row.
+- `POST /accounts/:id/recalculate` counts incoming transfers via `toAccountId`;
+  it previously ignored transfers entirely and produced wrong balances.
 - **GoCardless Bank Account Data (ex-Nordigen) auto-sync ("Phase 2"):** free tier,
   regulated AISP, supports ABN AMRO (NL). User consents via the bank; backend pulls
   on a schedule (reuse the cron pattern in `backend/src/services/backupService.js`).

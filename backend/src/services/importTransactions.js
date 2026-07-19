@@ -23,12 +23,17 @@ async function persistRows(parsedRows, accountId, source, initial = {}) {
     categoryIdByName.set(name.toLowerCase(), created.id);
   }
 
-  // Fetch already-imported externalIds in one query instead of a lookup per row
+  // Fetch already-imported externalIds in one query instead of a lookup per row.
+  // Matches on toAccountId as well: a transfer detected from the other side is
+  // stored under the paying account, but still represents this statement's row.
   const externalIds = parsedRows.map((p) => p.externalId).filter(Boolean);
   const seenExternalIds = new Set();
   if (externalIds.length > 0) {
     const existing = await prisma.transaction.findMany({
-      where: { accountId, externalId: { in: externalIds } },
+      where: {
+        externalId: { in: externalIds },
+        OR: [{ accountId }, { toAccountId: accountId }],
+      },
       select: { externalId: true },
     });
     for (const t of existing) seenExternalIds.add(t.externalId);
@@ -41,8 +46,12 @@ async function persistRows(parsedRows, accountId, source, initial = {}) {
       if (seenExternalIds.has(p.externalId)) { skipped++; continue; }
       seenExternalIds.add(p.externalId);
     }
+    // Transfer rows carry their own direction: the money leaves the paying
+    // account, which is not necessarily the statement being imported.
+    const isTransfer = p.type === "TRANSFER";
     toCreate.push({
-      accountId,
+      accountId: isTransfer ? p.transferFromAccountId : accountId,
+      toAccountId: isTransfer ? p.transferToAccountId : null,
       categoryId: p.categoryName ? categoryIdByName.get(p.categoryName.toLowerCase()) ?? null : null,
       amount: p.amount,
       description: p.description,
@@ -51,6 +60,7 @@ async function persistRows(parsedRows, accountId, source, initial = {}) {
       notes: p.notes,
       importedFrom: source,
       externalId: p.externalId || null,
+      counterpartyIban: p.counterpartyIban || null,
     });
   }
 

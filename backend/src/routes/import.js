@@ -6,6 +6,10 @@ const fs = require("fs");
 const path = require("path");
 const { parseCamt053 } = require("../services/camt053");
 const { persistRows } = require("../services/importTransactions");
+const { normaliseIban } = require("../services/iban");
+const {
+  MODES, getDefaultMode, applyAutoTransfers, findTransferCandidates, mergeCandidate,
+} = require("../services/transfers");
 
 const router = express.Router();
 const prisma = new PrismaClient();
@@ -113,54 +117,137 @@ router.post("/generic", upload.single("file"), async (req, res) => {
   res.json(results);
 });
 
-// Inspect a CAMT.053 file without importing it, so the UI can show what is in
-// the statement and preselect the matching account by IBAN.
-router.post("/camt/inspect", upload.single("file"), async (req, res) => {
-  if (!req.file) return res.status(400).json({ error: "CAMT.053 XML file required" });
+// ABN AMRO hands out one small file per day, so every CAMT endpoint takes a
+// batch. Parses each file, cleans up the uploads, and reports per-file errors.
+function readCamtBatch(files) {
+  const entries = [];
+  const ibans = new Set();
+  const errors = [];
+  let currency = null;
 
-  let parsed;
-  try {
-    parsed = parseCamt053(fs.readFileSync(req.file.path, "utf8"));
-  } catch (err) {
-    return res.status(400).json({ error: err.message });
-  } finally {
-    fs.unlinkSync(req.file.path);
+  for (const file of files) {
+    try {
+      const parsed = parseCamt053(fs.readFileSync(file.path, "utf8"));
+      entries.push(...parsed.entries);
+      if (parsed.iban) ibans.add(normaliseIban(parsed.iban));
+      currency = currency || parsed.currency;
+    } catch (err) {
+      errors.push(`${file.originalname}: ${err.message}`);
+    } finally {
+      try { fs.unlinkSync(file.path); } catch {}
+    }
   }
 
-  const dates = parsed.entries.map((e) => e.date).sort((a, b) => a - b);
-  const match = parsed.iban
-    ? await prisma.account.findFirst({
-        where: { iban: parsed.iban },
-        select: { id: true, name: true },
-      })
-    : null;
+  return { entries, ibans: [...ibans], currency, errors };
+}
+
+// Compared in JS rather than SQL so accounts saved before IBANs were
+// normalised still match.
+async function findAccountByIban(iban) {
+  if (!iban) return null;
+  const target = normaliseIban(iban);
+  const accounts = await prisma.account.findMany({
+    where: { iban: { not: null } },
+    select: { id: true, name: true, iban: true },
+  });
+  const hit = accounts.find((a) => normaliseIban(a.iban) === target);
+  return hit ? { id: hit.id, name: hit.name } : null;
+}
+
+// Inspect statements without importing, so the UI can show what is in them and
+// preselect the account matching their IBAN.
+router.post("/camt/inspect", upload.array("files", 400), async (req, res) => {
+  const files = req.files || [];
+  if (files.length === 0) return res.status(400).json({ error: "CAMT.053 XML file required" });
+
+  const batch = readCamtBatch(files);
+  if (batch.entries.length === 0 && batch.errors.length > 0) {
+    return res.status(400).json({ error: batch.errors[0] });
+  }
+
+  const dates = batch.entries.map((e) => e.date).sort((a, b) => a - b);
 
   res.json({
-    iban: parsed.iban,
-    currency: parsed.currency,
-    count: parsed.entries.length,
+    fileCount: files.length,
+    iban: batch.ibans[0] || null,
+    ibans: batch.ibans,
+    multipleAccounts: batch.ibans.length > 1,
+    currency: batch.currency,
+    count: batch.entries.length,
     from: dates[0] || null,
     to: dates[dates.length - 1] || null,
-    matchedAccount: match,
+    matchedAccount: batch.ibans.length === 1 ? await findAccountByIban(batch.ibans[0]) : null,
+    errors: batch.errors.slice(0, 10),
   });
 });
 
-router.post("/camt", upload.single("file"), async (req, res) => {
+router.post("/camt", upload.array("files", 400), async (req, res) => {
   const { accountId } = req.body;
+  const files = req.files || [];
   if (!accountId) return res.status(400).json({ error: "accountId required" });
-  if (!req.file) return res.status(400).json({ error: "CAMT.053 XML file required" });
+  if (files.length === 0) return res.status(400).json({ error: "CAMT.053 XML file required" });
 
-  let parsed;
-  try {
-    parsed = parseCamt053(fs.readFileSync(req.file.path, "utf8"));
-  } catch (err) {
-    return res.status(400).json({ error: err.message });
-  } finally {
-    fs.unlinkSync(req.file.path);
+  const batch = readCamtBatch(files);
+  if (batch.entries.length === 0) {
+    return res.status(400).json({
+      error: batch.errors[0] || "No transactions found in the selected files",
+    });
+  }
+  // Guard against dumping two different bank accounts into one FinTrack account
+  if (batch.ibans.length > 1) {
+    return res.status(400).json({
+      error: `The selected files belong to different accounts (${batch.ibans.join(", ")}). Import one account at a time.`,
+    });
   }
 
-  const results = await persistRows(parsed.entries, accountId, "camt053");
-  res.json({ ...results, iban: parsed.iban, currency: parsed.currency });
+  // Falls back to the configured default when the request does not specify one.
+  const mode = MODES.includes(req.body.transferMode)
+    ? req.body.transferMode
+    : await getDefaultMode();
+
+  let rows = batch.entries;
+  let linked = 0;
+  let mirrorsSkipped = 0;
+  if (mode === "auto") {
+    const applied = await applyAutoTransfers(rows, accountId);
+    rows = applied.rows;
+    linked = applied.linked;
+    mirrorsSkipped = applied.mirrorsSkipped;
+  }
+
+  const results = await persistRows(rows, accountId, "camt053", { errors: batch.errors });
+
+  // In confirm mode, show what could be merged rather than doing it silently.
+  const candidates = mode === "confirm" ? await findTransferCandidates() : [];
+
+  res.json({
+    ...results,
+    skipped: results.skipped + mirrorsSkipped,
+    fileCount: files.length,
+    iban: batch.ibans[0] || null,
+    currency: batch.currency,
+    transferMode: mode,
+    transfersLinked: linked,
+    transferCandidates: candidates.length,
+  });
+});
+
+// Candidate transfer pairs awaiting confirmation
+router.get("/transfers/candidates", async (req, res) => {
+  res.json(await findTransferCandidates());
+});
+
+// Collapse a confirmed pair into a single TRANSFER row
+router.post("/transfers/merge", async (req, res) => {
+  const { outgoingId, incomingId } = req.body;
+  if (!outgoingId || !incomingId) {
+    return res.status(400).json({ error: "outgoingId and incomingId required" });
+  }
+  try {
+    res.json(await mergeCandidate(outgoingId, incomingId));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
 });
 
 async function importCsv(filePath, accountId, rowParser, source) {

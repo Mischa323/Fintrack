@@ -72,6 +72,9 @@ model Transaction {
   recurring    RecurringTransaction? @relation(fields: [recurringId], references: [id])
   importedFrom String?
   externalId   String?
+  // Counterparty IBAN from imported statements; used to detect transfers
+  // between two accounts that both exist in FinTrack.
+  counterpartyIban String?
   createdAt    DateTime              @default(now())
   updatedAt    DateTime              @updatedAt
 
@@ -108,6 +111,8 @@ model Settings {
   googleOidcEnabled  Boolean  @default(false)
   googleClientId     String?
   googleClientSecret String?
+  // How imports handle transfers between two known accounts: off | auto | confirm
+  transferDetection  String   @default("confirm")
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
 }

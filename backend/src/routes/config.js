@@ -20,6 +20,7 @@ router.get("/", async (req, res) => {
     defaultCurrency: s.defaultCurrency,
     appPort: s.appPort ?? parseInt(process.env.PORT) ?? 3001,
     hasCustomJwtSecret: !!s.jwtSecret,
+    transferDetection: s.transferDetection || "confirm",
     oidcEnabled: s.oidcEnabled,
     oidcTenantId: s.oidcTenantId ?? "",
     oidcClientId: s.oidcClientId ?? "",
@@ -33,7 +34,7 @@ router.get("/", async (req, res) => {
 // PUT /config
 router.put("/", async (req, res) => {
   const {
-    appName, defaultCurrency, appPort, jwtSecret,
+    appName, defaultCurrency, appPort, jwtSecret, transferDetection,
     oidcEnabled, oidcTenantId, oidcClientId, oidcClientSecret,
     googleOidcEnabled, googleClientId, googleClientSecret,
   } = req.body;
@@ -42,6 +43,7 @@ router.put("/", async (req, res) => {
   if (defaultCurrency !== undefined) data.defaultCurrency = String(defaultCurrency).trim().toUpperCase() || "EUR";
   if (appPort !== undefined) data.appPort = parseInt(appPort) || null;
   if (jwtSecret !== undefined) data.jwtSecret = jwtSecret || null;
+  if (transferDetection !== undefined && ["off","auto","confirm"].includes(transferDetection)) data.transferDetection = transferDetection;
   if (oidcEnabled !== undefined) data.oidcEnabled = Boolean(oidcEnabled);
   if (oidcTenantId !== undefined) data.oidcTenantId = oidcTenantId || null;
   if (oidcClientId !== undefined) data.oidcClientId = oidcClientId || null;

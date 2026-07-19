@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { importApi, backup as backupApi, accounts as accountsApi } from "../api/client";
+import { importApi, backup as backupApi, accounts as accountsApi, config as configApi } from "../api/client";
 import GlassCard from "../components/GlassCard";
 
 const STEPS_MAYBE = ["Source", "Accounts", "Transactions"];
@@ -68,6 +68,51 @@ function FileDropzone({ fileRef, file, onFile, accept = ".csv", label = "Drop yo
         )}
       </div>
       <input ref={fileRef} type="file" accept={accept} style={{ display: "none" }} onChange={(e) => onFile(e.target.files[0])} />
+    </div>
+  );
+}
+
+// Multi-file variant: ABN AMRO exports one file per day, so statements arrive
+// in batches of dozens.
+function MultiFileDropzone({ fileRef, files, onFiles, accept = ".xml", label = "Drop your files here" }) {
+  const total = files.reduce((sum, f) => sum + f.size, 0);
+  return (
+    <div>
+      <div
+        onClick={() => fileRef.current.click()}
+        onDragOver={(e) => e.preventDefault()}
+        onDrop={(e) => { e.preventDefault(); const f = [...e.dataTransfer.files]; if (f.length) onFiles(f); }}
+        style={{
+          border: `2px dashed ${files.length ? "rgba(129,140,248,0.5)" : "rgba(255,255,255,0.15)"}`,
+          borderRadius: 14, padding: "24px 20px", textAlign: "center", cursor: "pointer",
+          background: files.length ? "rgba(99,102,241,0.07)" : undefined,
+          transition: "all 0.2s",
+        }}
+      >
+        {files.length ? (
+          <div>
+            <div style={{ fontSize: 28, marginBottom: 6 }}>🗂</div>
+            <div style={{ fontWeight: 600, fontSize: 14 }}>
+              {files.length} file{files.length !== 1 ? "s" : ""} selected
+            </div>
+            <div style={{ fontSize: 12, color: "rgba(255,255,255,0.4)", marginTop: 2 }}>
+              {(total / 1024).toFixed(0)} KB total — click to change
+            </div>
+          </div>
+        ) : (
+          <div>
+            <div style={{ fontSize: 28, marginBottom: 6 }}>⇪</div>
+            <div style={{ fontWeight: 500 }}>{label}</div>
+            <div style={{ fontSize: 13, color: "rgba(255,255,255,0.4)", marginTop: 4 }}>
+              or click to browse — you can select many at once
+            </div>
+          </div>
+        )}
+      </div>
+      <input
+        ref={fileRef} type="file" accept={accept} multiple style={{ display: "none" }}
+        onChange={(e) => onFiles([...e.target.files])}
+      />
     </div>
   );
 }
@@ -351,31 +396,103 @@ function StepMaybeTransactions({ onBack }) {
   );
 }
 
-// ── ABN AMRO CAMT.053 statement ──────────────────────────────────────────────
+// ── ABN AMRO CAMT.053 statements ─────────────────────────────────────────────
+
+const TRANSFER_MODES = [
+  { id: "confirm", label: "Ask me",     desc: "Import normally, then show transfers I can confirm" },
+  { id: "auto",    label: "Automatic",  desc: "Link them into transfers during import" },
+  { id: "off",     label: "Off",        desc: "Treat every line as income or expense" },
+];
+
+function TransferCandidates({ candidates, onMerged }) {
+  const [busy, setBusy] = useState(null);
+  const [done, setDone] = useState([]);
+
+  const merge = async (c) => {
+    setBusy(c.outgoingId);
+    try {
+      await importApi.mergeTransfer(c.outgoingId, c.incomingId);
+      setDone((d) => [...d, c.outgoingId]);
+      onMerged?.();
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const pending = candidates.filter((c) => !done.includes(c.outgoingId));
+  if (pending.length === 0) return null;
+
+  const fmt = (n) => new Intl.NumberFormat("nl-NL", { style: "currency", currency: "EUR" }).format(n);
+
+  return (
+    <div style={{
+      borderRadius: 12, padding: "14px 18px",
+      background: "rgba(251,191,36,0.07)", border: "1px solid rgba(251,191,36,0.25)",
+    }}>
+      <div style={{ fontWeight: 600, color: "#fbbf24", marginBottom: 4 }}>
+        {pending.length} possible transfer{pending.length !== 1 ? "s" : ""} between your own accounts
+      </div>
+      <div style={{ fontSize: 13, color: "rgba(255,255,255,0.5)", marginBottom: 12, lineHeight: 1.6 }}>
+        These look like money moved between two accounts you own. Merging turns each pair into a
+        single transfer, so it stops counting as both income and expense.
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        {pending.map((c) => (
+          <div key={c.outgoingId} style={{
+            display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12,
+            padding: "9px 12px", borderRadius: 9, background: "rgba(255,255,255,0.04)", fontSize: 13,
+          }}>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontWeight: 600 }}>{fmt(c.amount)}</div>
+              <div style={{ color: "rgba(255,255,255,0.45)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {c.from.name} → {c.to.name} · {new Date(c.date).toLocaleDateString()}
+              </div>
+            </div>
+            <button
+              className="glass-btn"
+              style={{ padding: "6px 14px", fontSize: 13, whiteSpace: "nowrap", opacity: busy === c.outgoingId ? 0.5 : 1 }}
+              onClick={() => merge(c)}
+              disabled={busy === c.outgoingId}
+            >
+              {busy === c.outgoingId ? "Merging…" : "Merge"}
+            </button>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function StepAbnCamt({ onBack }) {
   const [accounts, setAccounts] = useState([]);
   const [accountId, setAccountId] = useState("");
-  const [file, setFile] = useState(null);
+  const [files, setFiles] = useState([]);
   const [preview, setPreview] = useState(null);
   const [inspecting, setInspecting] = useState(false);
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState(null);
+  const [mode, setMode] = useState(null); // null until the default loads
+  const [candidates, setCandidates] = useState([]);
   const fileRef = useRef();
 
   useEffect(() => {
     accountsApi.list().then((a) => { setAccounts(a); if (a[0]) setAccountId(a[0].id); });
+    configApi.get()
+      .then((c) => setMode(c.transferDetection || "confirm"))
+      .catch(() => setMode("confirm"));
   }, []);
 
-  // Inspect the statement as soon as it is picked, so the user can confirm the
-  // contents and we can preselect the account matching the statement's IBAN.
-  const handleFile = async (f) => {
-    setFile(f);
+  // Inspect as soon as files are picked, so the contents can be confirmed and
+  // the account matching the statement IBAN preselected.
+  const handleFiles = async (list) => {
+    setFiles(list);
     setPreview(null);
     setResult(null);
-    if (!f) return;
+    setCandidates([]);
+    if (!list.length) return;
     setInspecting(true);
     try {
-      const info = await importApi.camtInspect(f);
+      const info = await importApi.camtInspect(list);
       setPreview(info);
       if (info.matchedAccount) setAccountId(info.matchedAccount.id);
     } catch (e) {
@@ -386,15 +503,19 @@ function StepAbnCamt({ onBack }) {
   };
 
   const handleImport = async () => {
-    if (!file || !accountId) return;
+    if (!files.length || !accountId) return;
     setLoading(true);
     setResult(null);
     try {
-      const res = await importApi.camt(accountId, file);
-      setResult({
-        message: `✓ ${res.imported} transaction${res.imported !== 1 ? "s" : ""} imported`
-          + (res.skipped ? `, ${res.skipped} skipped as duplicates` : ""),
-      });
+      const res = await importApi.camt(accountId, files, mode);
+      const bits = [`✓ ${res.imported} transaction${res.imported !== 1 ? "s" : ""} imported`];
+      if (res.fileCount > 1) bits.push(`from ${res.fileCount} files`);
+      if (res.skipped) bits.push(`${res.skipped} skipped as duplicates`);
+      if (res.transfersLinked) bits.push(`${res.transfersLinked} linked as transfers`);
+      setResult({ message: bits.join(", ") });
+      if (res.transferCandidates > 0) {
+        setCandidates(await importApi.transferCandidates());
+      }
     } catch (e) {
       setResult({ error: true, message: e.response?.data?.error || e.message });
     } finally {
@@ -407,18 +528,29 @@ function StepAbnCamt({ onBack }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
       <div>
-        <div style={{ fontWeight: 700, fontSize: 17, marginBottom: 6 }}>Import an ABN AMRO statement</div>
+        <div style={{ fontWeight: 700, fontSize: 17, marginBottom: 8 }}>Import ABN AMRO statements</div>
         <div style={{ fontSize: 14, color: "rgba(255,255,255,0.5)", lineHeight: 1.7 }}>
-          In ABN AMRO internet banking go to <strong>Zelf regelen → Downloaden</strong>, choose
-          format <strong>CAMT.053 (XML)</strong>, pick your period and download. Upload that file here.
-          Re-importing the same period is safe — duplicates are skipped automatically.
+          In ABN AMRO internet banking (Mijn ABN AMRO → <strong>Zelf regelen</strong>):
+        </div>
+        <ol style={{ fontSize: 14, color: "rgba(255,255,255,0.5)", lineHeight: 1.9, margin: "8px 0 0", paddingLeft: 20 }}>
+          <li>Go to <strong>Overzichten en afschriften</strong></li>
+          <li>Choose <strong>Bij- en afschrijvingen downloaden</strong></li>
+          <li>Pick your account and period</li>
+          <li>Choose file type <strong>CAMT.053 (XML)</strong> and download</li>
+        </ol>
+        <div style={{ fontSize: 13, color: "rgba(255,255,255,0.4)", marginTop: 10, lineHeight: 1.7 }}>
+          ABN gives you one file per day, so select them all at once below. Re-importing the same
+          period is safe — duplicates are skipped automatically.
         </div>
       </div>
 
-      <FileDropzone fileRef={fileRef} file={file} onFile={handleFile} accept=".xml" label="Drop your CAMT.053 .xml file here" />
+      <MultiFileDropzone
+        fileRef={fileRef} files={files} onFiles={handleFiles}
+        accept=".xml" label="Drop your CAMT.053 .xml files here"
+      />
 
       {inspecting && (
-        <div style={{ fontSize: 13, color: "rgba(255,255,255,0.4)" }}>Reading statement…</div>
+        <div style={{ fontSize: 13, color: "rgba(255,255,255,0.4)" }}>Reading statements…</div>
       )}
 
       {preview && (
@@ -426,13 +558,23 @@ function StepAbnCamt({ onBack }) {
           borderRadius: 12, padding: "14px 18px", fontSize: 13, lineHeight: 1.8,
           background: "rgba(99,102,241,0.08)", border: "1px solid rgba(129,140,248,0.25)",
         }}>
-          <div style={{ fontWeight: 600, color: "#c7d2fe", marginBottom: 4 }}>Statement contents</div>
+          <div style={{ fontWeight: 600, color: "#c7d2fe", marginBottom: 4 }}>
+            {preview.fileCount} file{preview.fileCount !== 1 ? "s" : ""} read
+          </div>
           <div style={{ color: "rgba(255,255,255,0.6)" }}>
             <div>{preview.count} transaction{preview.count !== 1 ? "s" : ""} · {fmtDate(preview.from)} → {fmtDate(preview.to)}</div>
             {preview.iban && <div>Account: {preview.iban}{preview.currency ? ` (${preview.currency})` : ""}</div>}
-            {preview.matchedAccount
+            {preview.multipleAccounts && (
+              <div style={{ color: "#f87171" }}>
+                These files cover different accounts ({preview.ibans.join(", ")}) — import one account at a time.
+              </div>
+            )}
+            {!preview.multipleAccounts && (preview.matchedAccount
               ? <div style={{ color: "#6ee7b7" }}>Matched to “{preview.matchedAccount.name}” by IBAN</div>
-              : preview.iban && <div style={{ color: "#fbbf24" }}>No account has this IBAN — pick the target below</div>}
+              : preview.iban && <div style={{ color: "#fbbf24" }}>No account has this IBAN — pick the target below</div>)}
+            {preview.errors?.length > 0 && (
+              <div style={{ color: "#fbbf24" }}>{preview.errors.length} file(s) could not be read: {preview.errors[0]}</div>
+            )}
           </div>
         </div>
       )}
@@ -443,21 +585,54 @@ function StepAbnCamt({ onBack }) {
           {accounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
         </select>
         <div style={{ fontSize: 12, color: "rgba(255,255,255,0.35)", marginTop: 6 }}>
-          Tip: set the IBAN on your account and it will be matched automatically next time.
+          Tip: set this account's IBAN to {preview?.iban || "the statement IBAN"} and it will be matched automatically next time.
+        </div>
+      </div>
+
+      <div>
+        <div style={{ fontSize: 13, color: "rgba(255,255,255,0.5)", marginBottom: 6 }}>
+          Transfers between your own accounts
+        </div>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          {TRANSFER_MODES.map((m) => {
+            const active = m.id === mode;
+            return (
+              <button
+                key={m.id}
+                onClick={() => setMode(m.id)}
+                title={m.desc}
+                style={{
+                  flex: "1 1 120px", padding: "9px 12px", borderRadius: 10, cursor: "pointer",
+                  textAlign: "left", fontSize: 13,
+                  border: `1px solid ${active ? "rgba(129,140,248,0.6)" : "rgba(255,255,255,0.1)"}`,
+                  background: active ? "rgba(99,102,241,0.18)" : "rgba(255,255,255,0.03)",
+                  color: active ? "#c7d2fe" : "rgba(255,255,255,0.55)",
+                  transition: "all 0.15s",
+                }}
+              >
+                <div style={{ fontWeight: 600 }}>{m.label}</div>
+                <div style={{ fontSize: 11, opacity: 0.75, marginTop: 2, lineHeight: 1.4 }}>{m.desc}</div>
+              </button>
+            );
+          })}
+        </div>
+        <div style={{ fontSize: 12, color: "rgba(255,255,255,0.35)", marginTop: 6 }}>
+          The default comes from Settings → Server and can be changed there.
         </div>
       </div>
 
       <ResultBanner result={result} onDismiss={() => setResult(null)} />
+      <TransferCandidates candidates={candidates} />
 
       <div style={{ display: "flex", gap: 10 }}>
         <button className="glass-btn" style={{ padding: "11px 20px" }} onClick={onBack}>← Back</button>
         <button
           className="glass-btn glass-btn-primary"
-          style={{ flex: 1, padding: "11px 20px", opacity: (!file || !accountId || loading || inspecting) ? 0.5 : 1 }}
+          style={{ flex: 1, padding: "11px 20px", opacity: (!files.length || !accountId || loading || inspecting || preview?.multipleAccounts) ? 0.5 : 1 }}
           onClick={handleImport}
-          disabled={!file || !accountId || loading || inspecting}
+          disabled={!files.length || !accountId || loading || inspecting || preview?.multipleAccounts}
         >
-          {loading ? "Importing…" : "Import Statement"}
+          {loading ? "Importing…" : files.length > 1 ? `Import ${files.length} Statements` : "Import Statement"}
         </button>
       </div>
     </div>

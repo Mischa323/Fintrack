@@ -1,0 +1,219 @@
+const { PrismaClient } = require("@prisma/client");
+
+const prisma = new PrismaClient();
+
+// Detects transfers between two accounts that both exist in FinTrack.
+//
+// A transfer shows up twice in bank data: as money out of account A and money
+// into account B. FinTrack models it as ONE row (accountId -> toAccountId), so
+// the second leg must never become its own transaction.
+//
+// Modes:
+//   off     — import everything as INCOME/EXPENSE (no detection)
+//   auto    — link matching entries into TRANSFER rows during import
+//   confirm — import normally, then surface candidate pairs for the user
+
+const MODES = ["off", "auto", "confirm"];
+
+// How far apart the two legs of one transfer may be booked.
+const MATCH_WINDOW_DAYS = 4;
+
+function normaliseIban(value) {
+  return value ? String(value).replace(/\s+/g, "").toUpperCase() : null;
+}
+
+function daysBetween(a, b) {
+  return Math.abs(a.getTime() - b.getTime()) / 86400000;
+}
+
+async function getDefaultMode() {
+  const settings = await prisma.settings.upsert({
+    where: { id: "singleton" },
+    update: {},
+    create: { id: "singleton" },
+  });
+  return MODES.includes(settings.transferDetection) ? settings.transferDetection : "confirm";
+}
+
+// Map of IBAN -> account, for every account that has one configured.
+async function ibanAccountMap() {
+  const accounts = await prisma.account.findMany({
+    where: { iban: { not: null } },
+    select: { id: true, name: true, iban: true },
+  });
+  const map = new Map();
+  for (const a of accounts) {
+    const key = normaliseIban(a.iban);
+    if (key) map.set(key, a);
+  }
+  return map;
+}
+
+// Is this leg already represented by a transfer row we stored earlier?
+// Covers importing the two statements of one transfer in either order.
+async function mirrorLegExists({ accountId, otherAccountId, amount, date }) {
+  const from = new Date(date);
+  from.setDate(from.getDate() - MATCH_WINDOW_DAYS);
+  const to = new Date(date);
+  to.setDate(to.getDate() + MATCH_WINDOW_DAYS);
+
+  const existing = await prisma.transaction.findFirst({
+    where: {
+      type: "TRANSFER",
+      amount,
+      date: { gte: from, lte: to },
+      OR: [
+        { accountId, toAccountId: otherAccountId },
+        { accountId: otherAccountId, toAccountId: accountId },
+      ],
+    },
+    select: { id: true },
+  });
+  return !!existing;
+}
+
+// Rewrites parsed rows in place for "auto" mode. Returns how many became
+// transfers and how many were dropped as an already-recorded mirror leg.
+async function applyAutoTransfers(rows, accountId) {
+  const byIban = await ibanAccountMap();
+  if (byIban.size === 0) return { rows, linked: 0, mirrorsSkipped: 0 };
+
+  const result = [];
+  let linked = 0;
+  let mirrorsSkipped = 0;
+
+  // Track transfers created within this same file so the opposite leg inside
+  // one statement does not produce a second row.
+  const pendingInFile = [];
+
+  for (const row of rows) {
+    const counterparty = byIban.get(normaliseIban(row.counterpartyIban));
+    if (!counterparty || counterparty.id === accountId) {
+      result.push(row);
+      continue;
+    }
+
+    const alreadyInFile = pendingInFile.some(
+      (p) =>
+        p.otherAccountId === counterparty.id &&
+        Math.abs(p.amount - row.amount) < 0.005 &&
+        daysBetween(p.date, row.date) <= MATCH_WINDOW_DAYS
+    );
+    const alreadyStored = await mirrorLegExists({
+      accountId,
+      otherAccountId: counterparty.id,
+      amount: row.amount,
+      date: row.date,
+    });
+
+    if (alreadyInFile || alreadyStored) {
+      mirrorsSkipped++;
+      continue;
+    }
+
+    // Record the transfer in its natural direction: out of the paying account.
+    const outgoing = row.type === "EXPENSE";
+    result.push({
+      ...row,
+      type: "TRANSFER",
+      transferFromAccountId: outgoing ? accountId : counterparty.id,
+      transferToAccountId: outgoing ? counterparty.id : accountId,
+    });
+    pendingInFile.push({ otherAccountId: counterparty.id, amount: row.amount, date: row.date });
+    linked++;
+  }
+
+  return { rows: result, linked, mirrorsSkipped };
+}
+
+// Finds INCOME/EXPENSE pairs that look like two legs of one transfer, for
+// "confirm" mode. Returns newest first.
+async function findTransferCandidates(limit = 50) {
+  const byIban = await ibanAccountMap();
+  if (byIban.size === 0) return [];
+
+  const rows = await prisma.transaction.findMany({
+    where: {
+      type: { in: ["INCOME", "EXPENSE"] },
+      counterpartyIban: { not: null },
+    },
+    select: {
+      id: true, accountId: true, amount: true, date: true, type: true,
+      description: true, counterpartyIban: true,
+    },
+    orderBy: { date: "desc" },
+    take: 2000,
+  });
+
+  const accounts = await prisma.account.findMany({ select: { id: true, name: true } });
+  const accountName = Object.fromEntries(accounts.map((a) => [a.id, a.name]));
+
+  const candidates = [];
+  const used = new Set();
+
+  for (const row of rows) {
+    if (used.has(row.id)) continue;
+    const counterparty = byIban.get(normaliseIban(row.counterpartyIban));
+    if (!counterparty || counterparty.id === row.accountId) continue;
+
+    // The opposite leg: booked on the counterparty account, opposite direction,
+    // same amount, close in time.
+    const match = rows.find(
+      (other) =>
+        !used.has(other.id) &&
+        other.id !== row.id &&
+        other.accountId === counterparty.id &&
+        other.type !== row.type &&
+        Math.abs(Number(other.amount) - Number(row.amount)) < 0.005 &&
+        daysBetween(other.date, row.date) <= MATCH_WINDOW_DAYS
+    );
+    if (!match) continue;
+
+    used.add(row.id);
+    used.add(match.id);
+
+    const outgoing = row.type === "EXPENSE" ? row : match;
+    const incoming = row.type === "EXPENSE" ? match : row;
+
+    candidates.push({
+      amount: Number(outgoing.amount),
+      date: outgoing.date,
+      from: { id: outgoing.accountId, name: accountName[outgoing.accountId] },
+      to: { id: incoming.accountId, name: accountName[incoming.accountId] },
+      outgoingId: outgoing.id,
+      incomingId: incoming.id,
+      description: outgoing.description,
+    });
+    if (candidates.length >= limit) break;
+  }
+
+  return candidates;
+}
+
+// Collapses a detected pair into a single TRANSFER row.
+async function mergeCandidate(outgoingId, incomingId) {
+  const [outgoing, incoming] = await Promise.all([
+    prisma.transaction.findUnique({ where: { id: outgoingId } }),
+    prisma.transaction.findUnique({ where: { id: incomingId } }),
+  ]);
+  if (!outgoing || !incoming) throw new Error("One of the transactions no longer exists");
+  if (outgoing.accountId === incoming.accountId) throw new Error("Both legs are on the same account");
+
+  await prisma.$transaction([
+    prisma.transaction.update({
+      where: { id: outgoing.id },
+      data: { type: "TRANSFER", toAccountId: incoming.accountId },
+    }),
+    prisma.transaction.delete({ where: { id: incoming.id } }),
+  ]);
+
+  return { id: outgoing.id };
+}
+
+module.exports = {
+  MODES,
+  getDefaultMode,
+  applyAutoTransfers,
+  findTransferCandidates,
+  mergeCandidate,
+};
