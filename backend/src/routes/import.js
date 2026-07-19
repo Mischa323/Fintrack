@@ -57,16 +57,6 @@ function parseGenericRow(row) {
   };
 }
 
-async function resolveCategory(name) {
-  if (!name) return null;
-  const results = await prisma.$queryRaw`SELECT id FROM "Category" WHERE LOWER(name) = LOWER(${name}) LIMIT 1`;
-  if (results.length > 0) return results[0].id;
-  const created = await prisma.category.create({
-    data: { name, color: "#6b7280" },
-  });
-  return created.id;
-}
-
 // Import Maybe Finance accounts.csv to sync account balances
 router.post("/maybe-accounts", upload.single("file"), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: "CSV file required" });
@@ -131,10 +121,11 @@ async function importCsv(filePath, accountId, rowParser, source) {
     });
   });
 
-  let imported = 0;
   let skipped = 0;
   const errors = [];
 
+  // 1. Parse every row up front
+  const parsedRows = [];
   for (const row of rows) {
     try {
       const parsed = rowParser(row);
@@ -142,34 +133,76 @@ async function importCsv(filePath, accountId, rowParser, source) {
         skipped++;
         continue;
       }
-
-      const categoryId = await resolveCategory(parsed.categoryName);
-
-      const data = {
-        accountId,
-        categoryId,
-        amount: parsed.amount,
-        description: parsed.description,
-        date: parsed.date,
-        type: parsed.type,
-        notes: parsed.notes,
-        importedFrom: source,
-        externalId: parsed.externalId || null,
-      };
-
-      if (parsed.externalId) {
-        const existing = await prisma.transaction.findUnique({
-          where: { externalId_accountId: { externalId: parsed.externalId, accountId } },
-          select: { id: true },
-        });
-        if (existing) { skipped++; continue; }
-      }
-
-      await prisma.transaction.create({ data });
-      imported++;
+      parsedRows.push(parsed);
     } catch (err) {
       errors.push(err.message);
       skipped++;
+    }
+  }
+
+  // 2. Resolve every category in one pass instead of a query per row
+  const categoryIdByName = new Map();
+  const existingCategories = await prisma.category.findMany({ select: { id: true, name: true } });
+  for (const c of existingCategories) categoryIdByName.set(c.name.toLowerCase(), c.id);
+
+  const wantedNames = [...new Set(parsedRows.map((p) => p.categoryName).filter(Boolean))];
+  for (const name of wantedNames) {
+    if (categoryIdByName.has(name.toLowerCase())) continue;
+    const created = await prisma.category.create({ data: { name, color: "#6b7280" } });
+    categoryIdByName.set(name.toLowerCase(), created.id);
+  }
+
+  // 3. Fetch already-imported externalIds in one query instead of a lookup per row
+  const externalIds = parsedRows.map((p) => p.externalId).filter(Boolean);
+  const seenExternalIds = new Set();
+  if (externalIds.length > 0) {
+    const existing = await prisma.transaction.findMany({
+      where: { accountId, externalId: { in: externalIds } },
+      select: { externalId: true },
+    });
+    for (const t of existing) seenExternalIds.add(t.externalId);
+  }
+
+  const toCreate = [];
+  for (const p of parsedRows) {
+    // Skip rows already imported, and duplicates within the file itself
+    if (p.externalId) {
+      if (seenExternalIds.has(p.externalId)) { skipped++; continue; }
+      seenExternalIds.add(p.externalId);
+    }
+    toCreate.push({
+      accountId,
+      categoryId: p.categoryName ? categoryIdByName.get(p.categoryName.toLowerCase()) ?? null : null,
+      amount: p.amount,
+      description: p.description,
+      date: p.date,
+      type: p.type,
+      notes: p.notes,
+      importedFrom: source,
+      externalId: p.externalId || null,
+    });
+  }
+
+  // 4. Insert in batched transactions — one commit per chunk rather than per row,
+  //    which is what made large imports slow enough to time out.
+  let imported = 0;
+  const CHUNK_SIZE = 200;
+  for (let i = 0; i < toCreate.length; i += CHUNK_SIZE) {
+    const chunk = toCreate.slice(i, i + CHUNK_SIZE);
+    try {
+      await prisma.$transaction(chunk.map((data) => prisma.transaction.create({ data })));
+      imported += chunk.length;
+    } catch (err) {
+      // Fall back to per-row inserts so one bad row cannot fail the whole chunk
+      for (const data of chunk) {
+        try {
+          await prisma.transaction.create({ data });
+          imported++;
+        } catch (rowErr) {
+          errors.push(rowErr.message);
+          skipped++;
+        }
+      }
     }
   }
 
