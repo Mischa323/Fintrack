@@ -17,9 +17,11 @@ const statsRouter = require("./routes/stats");
 const goalsRouter = require("./routes/goals");
 const backupRouter = require("./routes/backup");
 const versionRouter = require("./routes/version");
+const holdingsRouter = require("./routes/holdings");
 const { processRecurring } = require("./services/recurringService");
 const { runBackup } = require("./services/backupService");
 const { initJwtSecret } = require("./services/jwtSecret");
+const { refreshHoldings } = require("./services/quotes");
 const { errorHandler } = require("./middleware/errorHandler");
 const authMiddleware = require("./middleware/auth");
 const { requireAdmin } = require("./middleware/auth");
@@ -47,6 +49,7 @@ app.use("/stats", statsRouter);
 app.use("/goals", goalsRouter);
 app.use("/backup", requireAdmin, backupRouter);
 app.use("/version", versionRouter);
+app.use("/holdings", holdingsRouter);
 
 app.get("/health", (_, res) => res.json({ status: "ok" }));
 
@@ -54,6 +57,11 @@ app.use(errorHandler);
 
 cron.schedule("0 0 * * *", () => {
   processRecurring().catch(console.error);
+});
+
+// Refresh investment prices on weekday mornings, after European markets settle
+cron.schedule("30 6 * * 1-5", () => {
+  refreshHoldings().catch(console.error);
 });
 
 cron.schedule("0 2 * * *", () => {

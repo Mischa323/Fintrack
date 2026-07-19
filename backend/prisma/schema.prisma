@@ -26,6 +26,27 @@ model Account {
   toTransactions Transaction[]          @relation("ToAccount")
   recurring      RecurringTransaction[]
   goals          Goal[]
+  holdings       Holding[]
+}
+
+// An investment position. Revolut and other brokers expose no API for personal
+// accounts, so quantities are entered or imported once; only the price is
+// refreshed automatically.
+model Holding {
+  id          String    @id @default(cuid())
+  accountId   String
+  account     Account   @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  symbol      String // ticker used for the price lookup, e.g. AAPL or ASML.AS
+  name        String?
+  quantity    Decimal
+  avgCost     Decimal? // per share, in `currency`
+  currency    String    @default("USD") // currency the price is quoted in
+  lastPrice   Decimal?
+  lastPriceAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@unique([accountId, symbol])
 }
 
 model Goal {

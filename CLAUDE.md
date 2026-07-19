@@ -88,7 +88,7 @@ To actually get Watchtower auto-updates, images must be published (GitHub Action
 
 `backend/package.json` `version` is the **single source of truth** — bump it on
 every meaningful change (keep `frontend/package.json` in sync for tidiness).
-Currently **1.7.1**.
+Currently **1.8.0**.
 
 - `GET /version` → `{ version, buildTime }` (authenticated)
 - `GET /version/check` → compares against the `version` in `backend/package.json`
@@ -129,6 +129,34 @@ step 2. Changing the secret invalidates existing sessions.
   SQLite commit each made imports exceed nginx's 60s timeout. Now: categories
   resolved via one map, existing `externalId`s fetched in one query, inserts
   batched 200-per-transaction. nginx proxy timeouts raised to 300s.
+
+## Investments (holdings)
+
+No broker offers an API for **personal** accounts — Revolut included — and PSD2
+covers payment accounts only, so open banking would not help either. FinTrack
+therefore never learns *which* shares you own; you enter or import those once.
+What it does automatically is keep their **prices** current, which is the part
+that actually changes daily.
+
+- `Holding` model: symbol, quantity, avgCost, currency, lastPrice, lastPriceAt,
+  unique per `[accountId, symbol]`.
+- `services/quotes.js` — `fetchQuote()` is the only place that knows the quote
+  provider (Yahoo's chart endpoint: free, no key, US + European tickers). It is
+  an **unofficial** endpoint, so if it breaks only that function changes.
+- FX via frankfurter.app (ECB rates, no key), resolved once per run and cached.
+  A rate that cannot be fetched values the position unconverted and is reported,
+  rather than failing the whole refresh.
+- `recalculateAccountValue()` sets an investment account's balance to
+  Σ(quantity × lastPrice × fx), so the balance is derived, not typed in.
+- Cron refreshes prices weekday mornings (`30 6 * * 1-5`).
+- Adding a position looks the price up immediately, so a bad ticker is rejected
+  at entry instead of sitting at zero until the next refresh. European tickers
+  need their suffix (ASML.AS, SHELL.AS, MC.PA).
+- **Revolut import** (`POST /holdings/import/revolut`) takes the Stocks account
+  statement. Revolut exports *trades, not positions*, so positions are derived:
+  buys and sells netted per ticker, average cost weighted across buys, and a
+  fully sold ticker is dropped. Dividends, fees and top-ups are ignored.
+  Column matching is fuzzy since the export format varies.
 
 ## Bulk transaction actions
 

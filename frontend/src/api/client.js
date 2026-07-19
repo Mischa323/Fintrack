@@ -103,6 +103,20 @@ export const importApi = {
   },
 };
 
+export const holdings = {
+  list: (accountId) => api.get("/holdings", { params: { accountId } }).then((r) => r.data),
+  create: (data) => api.post("/holdings", data).then((r) => r.data),
+  update: (id, data) => api.put(`/holdings/${id}`, data).then((r) => r.data),
+  remove: (id) => api.delete(`/holdings/${id}`),
+  refresh: (accountId) => api.post("/holdings/refresh", { accountId }).then((r) => r.data),
+  importRevolut: (accountId, file) => {
+    const form = new FormData();
+    form.append("accountId", accountId);
+    form.append("file", file);
+    return api.post("/holdings/import/revolut", form).then((r) => r.data);
+  },
+};
+
 export const goals = {
   list: () => api.get("/goals").then((r) => r.data),
   create: (data) => api.post("/goals", data).then((r) => r.data),

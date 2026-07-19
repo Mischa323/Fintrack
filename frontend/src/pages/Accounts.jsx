@@ -1,6 +1,6 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
-import { accounts as accountsApi } from "../api/client";
+import { accounts as accountsApi , holdings as holdingsApi } from "../api/client";
 import GlassCard from "../components/GlassCard";
 
 const TYPES = [
@@ -19,6 +19,212 @@ const emptyForm = { name: "", type: "CHECKING", currency: "EUR", balance: "", co
 const fieldStyle = { padding: "10px 14px", width: "100%", boxSizing: "border-box", display: "block", marginTop: 6 };
 const labelStyle = { fontSize: 12, color: "rgba(255,255,255,0.5)", fontWeight: 500, display: "block" };
 
+// ── Investment holdings ──────────────────────────────────────────────────────
+// No broker offers an API for personal accounts, so quantities are entered or
+// imported once. Only the prices refresh automatically.
+function HoldingsModal({ account, onClose, onChanged }) {
+  const [rows, setRows] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState(null);
+  const [form, setForm] = useState({ symbol: "", quantity: "", avgCost: "" });
+  const fileRef = useRef();
+
+  const money = (n, cur) =>
+    new Intl.NumberFormat("nl-NL", { style: "currency", currency: cur || "EUR" }).format(n);
+
+  const load = async () => {
+    const data = await holdingsApi.list(account.id);
+    setRows(data);
+    setLoading(false);
+  };
+  useEffect(() => { load(); }, [account.id]);
+
+  const done = (text) => { setMsg({ text }); load(); onChanged?.(); };
+
+  const add = async (e) => {
+    e.preventDefault();
+    if (!form.symbol.trim() || !form.quantity) return;
+    setBusy(true);
+    setMsg(null);
+    try {
+      await holdingsApi.create({
+        accountId: account.id,
+        symbol: form.symbol.trim(),
+        quantity: Number(form.quantity),
+        avgCost: form.avgCost === "" ? undefined : Number(form.avgCost),
+      });
+      setForm({ symbol: "", quantity: "", avgCost: "" });
+      done("Position added");
+    } catch (err) {
+      setMsg({ error: true, text: err.response?.data?.error || err.message });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const refresh = async () => {
+    setBusy(true);
+    setMsg(null);
+    try {
+      const r = await holdingsApi.refresh(account.id);
+      done(`Prices updated for ${r.updated} position${r.updated === 1 ? "" : "s"}`
+        + (r.failed ? ` — ${r.failed} failed: ${r.errors[0]}` : ""));
+    } catch (err) {
+      setMsg({ error: true, text: err.response?.data?.error || err.message });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const importCsv = async (file) => {
+    if (!file) return;
+    setBusy(true);
+    setMsg(null);
+    try {
+      const r = await holdingsApi.importRevolut(account.id, file);
+      done(`${r.imported} position${r.imported === 1 ? "" : "s"} imported from ${r.buys} buys and ${r.sells} sells`
+        + (r.errors?.length ? ` — ${r.errors[0]}` : ""));
+    } catch (err) {
+      setMsg({ error: true, text: err.response?.data?.error || err.message });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const remove = async (h) => {
+    if (!confirm(`Remove ${h.symbol} from this account?`)) return;
+    await holdingsApi.remove(h.id);
+    done("Position removed");
+  };
+
+  const total = rows.reduce(
+    (sum, h) => sum + (h.lastPrice ? Number(h.quantity) * Number(h.lastPrice) : 0), 0
+  );
+  const mixedCurrencies = new Set(rows.map((h) => h.currency)).size > 1;
+
+  return (
+    <div className="modal-overlay" onClick={(e) => e.target === e.currentTarget && onClose()}>
+      <div className="glass-strong" style={{ width: 720, maxWidth: "95vw", maxHeight: "90vh", padding: 28, display: "flex", flexDirection: "column" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12 }}>
+          <div>
+            <h2 style={{ margin: 0, fontSize: 18 }}>{account.name} — holdings</h2>
+            <p style={{ margin: "4px 0 0", fontSize: 13, color: "rgba(255,255,255,0.45)" }}>
+              Quantities are yours to set; prices refresh automatically each weekday morning.
+            </p>
+          </div>
+          <button className="glass-btn glass-btn-ghost" style={{ padding: "7px 14px", fontSize: 13 }} onClick={refresh} disabled={busy}>
+            {busy ? "Working…" : "↻ Refresh prices"}
+          </button>
+        </div>
+
+        {msg && (
+          <div style={{ marginTop: 14, fontSize: 13, color: msg.error ? "#f87171" : "#34d399" }}>
+            {msg.error ? "" : "✓ "}{msg.text}
+          </div>
+        )}
+
+        <div style={{ flex: 1, overflowY: "auto", marginTop: 16, minHeight: 100 }}>
+          {loading ? (
+            <div style={{ color: "rgba(255,255,255,0.35)", fontSize: 13 }}>Loading…</div>
+          ) : rows.length === 0 ? (
+            <div style={{ color: "rgba(255,255,255,0.3)", fontSize: 13, padding: "24px 0", textAlign: "center" }}>
+              No positions yet. Add one below, or import a Revolut statement.
+            </div>
+          ) : (
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+              <thead>
+                <tr style={{ borderBottom: "1px solid rgba(255,255,255,0.08)" }}>
+                  {["Symbol", "Qty", "Price", "Value", "Gain", ""].map((h) => (
+                    <th key={h} style={{ padding: "8px 10px", textAlign: h === "Symbol" ? "left" : "right", color: "rgba(255,255,255,0.4)", fontWeight: 600, whiteSpace: "nowrap" }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((h) => {
+                  const price = h.lastPrice == null ? null : Number(h.lastPrice);
+                  const value = price == null ? null : Number(h.quantity) * price;
+                  const cost = h.avgCost == null ? null : Number(h.quantity) * Number(h.avgCost);
+                  const gain = value != null && cost != null ? value - cost : null;
+                  const pct = gain != null && cost > 0 ? (gain / cost) * 100 : null;
+                  return (
+                    <tr key={h.id} style={{ borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
+                      <td style={{ padding: "9px 10px" }}>
+                        <div style={{ fontWeight: 600 }}>{h.symbol}</div>
+                        {h.name && <div style={{ color: "rgba(255,255,255,0.35)", fontSize: 12 }}>{h.name}</div>}
+                      </td>
+                      <td style={{ padding: "9px 10px", textAlign: "right" }}>{Number(h.quantity)}</td>
+                      <td style={{ padding: "9px 10px", textAlign: "right" }}>
+                        {price == null
+                          ? <span style={{ color: "#fbbf24" }}>no price</span>
+                          : money(price, h.currency)}
+                      </td>
+                      <td style={{ padding: "9px 10px", textAlign: "right", fontWeight: 600 }}>
+                        {value == null ? "—" : money(value, h.currency)}
+                      </td>
+                      <td style={{ padding: "9px 10px", textAlign: "right", color: gain == null ? "rgba(255,255,255,0.3)" : gain >= 0 ? "#34d399" : "#f87171" }}>
+                        {gain == null ? "—" : `${gain >= 0 ? "+" : ""}${money(gain, h.currency)}${pct != null ? ` (${pct >= 0 ? "+" : ""}${pct.toFixed(1)}%)` : ""}`}
+                      </td>
+                      <td style={{ padding: "9px 10px", textAlign: "right" }}>
+                        <button className="glass-btn glass-btn-danger" style={{ padding: "3px 9px", fontSize: 12 }} onClick={() => remove(h)}>×</button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          )}
+        </div>
+
+        {rows.length > 0 && (
+          <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid rgba(255,255,255,0.08)", fontSize: 13, color: "rgba(255,255,255,0.5)" }}>
+            {mixedCurrencies
+              ? `Positions are held in different currencies; the account balance converts them all to ${account.currency}.`
+              : `Total ${money(total, rows[0]?.currency)} — the account balance shows this in ${account.currency}.`}
+          </div>
+        )}
+
+        <form onSubmit={add} style={{ display: "flex", gap: 8, marginTop: 16, flexWrap: "wrap", alignItems: "flex-end" }}>
+          <label style={{ flex: "1 1 130px", fontSize: 12, color: "rgba(255,255,255,0.5)" }}>
+            Symbol
+            <input className="glass-input" style={{ padding: "9px 12px", width: "100%", marginTop: 4 }} placeholder="AAPL or ASML.AS"
+              value={form.symbol} onChange={(e) => setForm({ ...form, symbol: e.target.value })} />
+          </label>
+          <label style={{ flex: "0 1 100px", fontSize: 12, color: "rgba(255,255,255,0.5)" }}>
+            Quantity
+            <input className="glass-input" type="number" step="any" style={{ padding: "9px 12px", width: "100%", marginTop: 4 }} placeholder="10"
+              value={form.quantity} onChange={(e) => setForm({ ...form, quantity: e.target.value })} />
+          </label>
+          <label style={{ flex: "0 1 130px", fontSize: 12, color: "rgba(255,255,255,0.5)" }}>
+            Avg cost / share
+            <input className="glass-input" type="number" step="any" style={{ padding: "9px 12px", width: "100%", marginTop: 4 }} placeholder="optional"
+              value={form.avgCost} onChange={(e) => setForm({ ...form, avgCost: e.target.value })} />
+          </label>
+          <button type="submit" className="glass-btn glass-btn-primary" style={{ padding: "9px 18px" }} disabled={busy || !form.symbol.trim() || !form.quantity}>
+            Add
+          </button>
+        </form>
+        <div style={{ fontSize: 12, color: "rgba(255,255,255,0.3)", marginTop: 6 }}>
+          European tickers need their exchange suffix — ASML.AS, SHELL.AS, MC.PA.
+        </div>
+
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, marginTop: 18, paddingTop: 16, borderTop: "1px solid rgba(255,255,255,0.08)" }}>
+          <div style={{ fontSize: 12, color: "rgba(255,255,255,0.4)" }}>
+            Have many positions? Import the Stocks statement from the Revolut app.
+          </div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button className="glass-btn glass-btn-ghost" style={{ padding: "8px 16px", fontSize: 13 }} onClick={() => fileRef.current.click()} disabled={busy}>
+              Import Revolut CSV
+            </button>
+            <button className="glass-btn" style={{ padding: "8px 16px", fontSize: 13 }} onClick={onClose}>Close</button>
+          </div>
+          <input ref={fileRef} type="file" accept=".csv" style={{ display: "none" }} onChange={(e) => importCsv(e.target.files[0])} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function Accounts() {
   const navigate = useNavigate();
   const [items, setItems] = useState([]);
@@ -27,6 +233,7 @@ export default function Accounts() {
   const [editing, setEditing] = useState(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [holdingsFor, setHoldingsFor] = useState(null);
 
   const load = () => accountsApi.list().then(setItems);
   useEffect(() => { load(); }, []);
@@ -95,6 +302,9 @@ export default function Accounts() {
             </div>
             <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
               <button className="glass-btn glass-btn-ghost" style={{ padding: "6px 14px", fontSize: 13 }} onClick={() => navigate(`/transactions?accountId=${a.id}`)}>Transactions</button>
+              {a.type === "INVESTMENT" && (
+                <button className="glass-btn glass-btn-ghost" style={{ padding: "6px 14px", fontSize: 13 }} onClick={() => setHoldingsFor(a)}>Holdings</button>
+              )}
               <button className="glass-btn glass-btn-ghost" style={{ padding: "6px 14px", fontSize: 13 }} onClick={() => open(a)}>Edit</button>
               <button className="glass-btn glass-btn-danger" style={{ padding: "6px 14px", fontSize: 13 }} onClick={() => remove(a.id)}>Delete</button>
             </div>
@@ -106,6 +316,10 @@ export default function Accounts() {
           </div>
         )}
       </div>
+
+      {holdingsFor && (
+        <HoldingsModal account={holdingsFor} onClose={() => setHoldingsFor(null)} onChanged={load} />
+      )}
 
       {modal && (
         <div className="modal-overlay" onClick={(e) => e.target === e.currentTarget && setModal(false)}>
