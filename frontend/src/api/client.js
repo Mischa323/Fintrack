@@ -90,6 +90,7 @@ export const importApi = {
     return api.post("/import/camt", form).then((r) => r.data);
   },
   transferCandidates: () => api.get("/import/transfers/candidates").then((r) => r.data),
+  unlinkedIbans: () => api.get("/import/transfers/unlinked-ibans").then((r) => r.data),
   mergeTransfer: (outgoingId, incomingId) =>
     api.post("/import/transfers/merge", { outgoingId, incomingId }).then((r) => r.data),
   clear: (accountId, source) =>

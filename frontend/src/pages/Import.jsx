@@ -463,6 +463,42 @@ function TransferCandidates({ candidates, onMerged }) {
   );
 }
 
+// Transfer detection can only match a counterparty IBAN against an account that
+// actually has that IBAN filled in. When it does not, say so explicitly rather
+// than silently detecting nothing.
+function UnlinkedIbans({ items }) {
+  if (!items || items.length === 0) return null;
+  return (
+    <div style={{
+      borderRadius: 12, padding: "14px 18px",
+      background: "rgba(99,102,241,0.07)", border: "1px solid rgba(129,140,248,0.25)",
+    }}>
+      <div style={{ fontWeight: 600, color: "#c7d2fe", marginBottom: 4 }}>
+        Counterparty accounts FinTrack does not know
+      </div>
+      <div style={{ fontSize: 13, color: "rgba(255,255,255,0.5)", marginBottom: 10, lineHeight: 1.6 }}>
+        If one of these is your own account, open it under <strong>Accounts</strong> and fill in its
+        IBAN. Transfers to it are then detected automatically — including for transactions
+        already imported.
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+        {items.slice(0, 6).map((i) => (
+          <div key={i.iban} style={{
+            display: "flex", justifyContent: "space-between", gap: 12,
+            padding: "7px 11px", borderRadius: 8, background: "rgba(255,255,255,0.04)", fontSize: 13,
+          }}>
+            <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              <span style={{ fontFamily: "monospace" }}>{i.iban}</span>
+              {i.name && <span style={{ color: "rgba(255,255,255,0.45)" }}> · {i.name}</span>}
+            </span>
+            <span style={{ color: "rgba(255,255,255,0.35)", whiteSpace: "nowrap" }}>{i.count}×</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function StepAbnCamt({ onBack }) {
   const [accounts, setAccounts] = useState([]);
   const [accountId, setAccountId] = useState("");
@@ -473,6 +509,7 @@ function StepAbnCamt({ onBack }) {
   const [result, setResult] = useState(null);
   const [mode, setMode] = useState(null); // null until the default loads
   const [candidates, setCandidates] = useState([]);
+  const [unlinked, setUnlinked] = useState([]);
   const fileRef = useRef();
 
   useEffect(() => {
@@ -489,6 +526,7 @@ function StepAbnCamt({ onBack }) {
     setPreview(null);
     setResult(null);
     setCandidates([]);
+    setUnlinked([]);
     if (!list.length) return;
     setInspecting(true);
     try {
@@ -516,6 +554,9 @@ function StepAbnCamt({ onBack }) {
       if (res.transferCandidates > 0) {
         setCandidates(await importApi.transferCandidates());
       }
+      // Surface counterparty accounts we could not resolve, which is the usual
+      // reason a transfer to your own savings account goes undetected.
+      importApi.unlinkedIbans().then(setUnlinked).catch(() => {});
     } catch (e) {
       setResult({ error: true, message: e.response?.data?.error || e.message });
     } finally {
@@ -623,6 +664,7 @@ function StepAbnCamt({ onBack }) {
 
       <ResultBanner result={result} onDismiss={() => setResult(null)} />
       <TransferCandidates candidates={candidates} />
+      <UnlinkedIbans items={unlinked} />
 
       <div style={{ display: "flex", gap: 10 }}>
         <button className="glass-btn" style={{ padding: "11px 20px" }} onClick={onBack}>← Back</button>

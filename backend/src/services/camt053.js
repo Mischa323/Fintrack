@@ -81,6 +81,20 @@ function parseEntry(ntry, fallbackCounter) {
   }
 
   const additional = firstString(ntry?.AddtlNtryInf);
+
+  // ABN AMRO repeats the counterparty inside AddtlNtryInf as a /TRTP/ string:
+  //   /TRTP/SEPA OVERBOEKING/IBAN/NL50ABNA0104693797/BIC/…/NAME/… /EREF/…
+  // Used as a fallback when the structured RltdPties block is absent.
+  if (additional) {
+    if (!counterpartyIban) {
+      const m = /\/IBAN\/([A-Z0-9]+)/i.exec(additional);
+      if (m) counterpartyIban = m[1];
+    }
+    if (!counterpartyName) {
+      const m = /\/NAME\/([^/]+)/i.exec(additional);
+      if (m) counterpartyName = m[1].trim();
+    }
+  }
   const description =
     remittance.join(" ").trim() || counterpartyName || additional || "Bank transaction";
 

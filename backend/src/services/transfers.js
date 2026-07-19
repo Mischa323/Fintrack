@@ -1,4 +1,5 @@
 const { PrismaClient } = require("@prisma/client");
+const { normaliseIban: sharedNormalise } = require("./iban");
 
 const prisma = new PrismaClient();
 
@@ -18,9 +19,9 @@ const MODES = ["off", "auto", "confirm"];
 // How far apart the two legs of one transfer may be booked.
 const MATCH_WINDOW_DAYS = 4;
 
-function normaliseIban(value) {
-  return value ? String(value).replace(/\s+/g, "").toUpperCase() : null;
-}
+// Single shared implementation, so account IBANs and statement IBANs are always
+// compared the same way (spaces and dashes stripped, uppercased).
+const normaliseIban = sharedNormalise;
 
 function daysBetween(a, b) {
   return Math.abs(a.getTime() - b.getTime()) / 86400000;
@@ -126,9 +127,62 @@ async function applyAutoTransfers(rows, accountId) {
   return { rows: result, linked, mirrorsSkipped };
 }
 
+const IBAN_PATTERN = /\b([A-Z]{2}\d{2}[A-Z0-9]{8,26})\b/;
+
+// Transactions imported before counterpartyIban existed still carry the IBAN in
+// their notes. Recover it so those rows can take part in transfer detection.
+// Only touches rows where the column is still empty, so it is a no-op once done.
+async function backfillCounterpartyIbans() {
+  const rows = await prisma.transaction.findMany({
+    where: { counterpartyIban: null, notes: { not: null }, importedFrom: { not: null } },
+    select: { id: true, notes: true, account: { select: { iban: true } } },
+    take: 5000,
+  });
+
+  let filled = 0;
+  for (const row of rows) {
+    const match = IBAN_PATTERN.exec(String(row.notes).replace(/\s+/g, ""));
+    if (!match) continue;
+    const iban = normaliseIban(match[1]);
+    // Never store the account's own IBAN as its counterparty
+    if (!iban || iban === normaliseIban(row.account?.iban)) continue;
+    await prisma.transaction.update({ where: { id: row.id }, data: { counterpartyIban: iban } });
+    filled++;
+  }
+  return filled;
+}
+
+// Counterparty IBANs that appear in the data but match no account. These are the
+// ones the user probably still needs to fill in on an account for transfer
+// detection to work.
+async function unlinkedCounterpartyIbans(limit = 20) {
+  const byIban = await ibanAccountMap();
+  const rows = await prisma.transaction.findMany({
+    where: { counterpartyIban: { not: null } },
+    select: { counterpartyIban: true, notes: true, description: true },
+    take: 5000,
+    orderBy: { date: "desc" },
+  });
+
+  const seen = new Map();
+  for (const row of rows) {
+    const iban = normaliseIban(row.counterpartyIban);
+    if (!iban || byIban.has(iban)) continue;
+    const entry = seen.get(iban) || { iban, count: 0, name: null };
+    entry.count++;
+    if (!entry.name) entry.name = (row.notes || row.description || "").split(" · ")[0] || null;
+    seen.set(iban, entry);
+  }
+
+  return [...seen.values()].sort((a, b) => b.count - a.count).slice(0, limit);
+}
+
 // Finds INCOME/EXPENSE pairs that look like two legs of one transfer, for
 // "confirm" mode. Returns newest first.
 async function findTransferCandidates(limit = 50) {
+  // Make older imports eligible before looking for pairs
+  await backfillCounterpartyIbans();
+
   const byIban = await ibanAccountMap();
   if (byIban.size === 0) return [];
 
@@ -212,6 +266,8 @@ async function mergeCandidate(outgoingId, incomingId) {
 
 module.exports = {
   MODES,
+  backfillCounterpartyIbans,
+  unlinkedCounterpartyIbans,
   getDefaultMode,
   applyAutoTransfers,
   findTransferCandidates,

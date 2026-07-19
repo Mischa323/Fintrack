@@ -9,6 +9,7 @@ const { persistRows } = require("../services/importTransactions");
 const { normaliseIban } = require("../services/iban");
 const {
   MODES, getDefaultMode, applyAutoTransfers, findTransferCandidates, mergeCandidate,
+  unlinkedCounterpartyIbans,
 } = require("../services/transfers");
 
 const router = express.Router();
@@ -235,6 +236,12 @@ router.post("/camt", upload.array("files", 400), async (req, res) => {
 // Candidate transfer pairs awaiting confirmation
 router.get("/transfers/candidates", async (req, res) => {
   res.json(await findTransferCandidates());
+});
+
+// Counterparty IBANs seen in transactions that match no account — the usual
+// reason a transfer to your own savings account is not detected.
+router.get("/transfers/unlinked-ibans", async (req, res) => {
+  res.json(await unlinkedCounterpartyIbans());
 });
 
 // Collapse a confirmed pair into a single TRANSFER row
