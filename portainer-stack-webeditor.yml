@@ -1,0 +1,52 @@
+# FinTrack — Portainer WEB EDITOR stack
+#
+# Paste this straight into Portainer → Stacks → Add stack → Web editor.
+#
+# It needs no local source: the `context:` values are remote git URLs, so Docker
+# itself clones the repo and builds the images. Nothing to pre-publish, no registry.
+#
+# The frontend image serves the SPA and proxies /api to the backend, so no separate
+# nginx service (and no config bind-mount, which the web editor cannot provide).
+#
+# NOTE: builds pull from GitHub `master` — push your changes before redeploying.
+# To update later: Portainer → the stack → "Update the stack" with re-pull enabled.
+
+services:
+  backend:
+    build:
+      context: https://github.com/Mischa323/Fintrack.git#master:backend
+    container_name: finance-backend
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: file:/app/data/finance.db
+      PORT: "3001"
+      NODE_ENV: production
+      # No JWT_SECRET needed — generated on first boot and stored in the database.
+    volumes:
+      - db_data:/app/data
+      - uploads_data:/app/uploads
+    networks:
+      - finance-net
+
+  frontend:
+    build:
+      context: https://github.com/Mischa323/Fintrack.git#master:frontend
+      args:
+        VITE_API_URL: /api
+    container_name: finance-frontend
+    restart: unless-stopped
+    ports:
+      # Change 8080 if that port is already taken on your host.
+      - "8080:80"
+    depends_on:
+      - backend
+    networks:
+      - finance-net
+
+volumes:
+  db_data:       # SQLite database (also holds the auto-generated JWT secret)
+  uploads_data:  # import upload staging
+
+networks:
+  finance-net:
+    driver: bridge
