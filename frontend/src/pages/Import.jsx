@@ -408,18 +408,24 @@ function TransferCandidates({ candidates, onMerged }) {
   const [busy, setBusy] = useState(null);
   const [done, setDone] = useState([]);
 
+  const keyOf = (c) => (c.kind === "single" ? c.id : c.outgoingId);
+
   const merge = async (c) => {
-    setBusy(c.outgoingId);
+    const key = keyOf(c);
+    setBusy(key);
     try {
-      await importApi.mergeTransfer(c.outgoingId, c.incomingId);
-      setDone((d) => [...d, c.outgoingId]);
+      // A pair collapses two rows into one; a single row already describes the
+      // whole transfer and only needs its type and destination set.
+      if (c.kind === "single") await importApi.convertTransfer(c.id);
+      else await importApi.mergeTransfer(c.outgoingId, c.incomingId);
+      setDone((d) => [...d, key]);
       onMerged?.();
     } finally {
       setBusy(null);
     }
   };
 
-  const pending = candidates.filter((c) => !done.includes(c.outgoingId));
+  const pending = candidates.filter((c) => !done.includes(keyOf(c)));
   if (pending.length === 0) return null;
 
   const fmt = (n) => new Intl.NumberFormat("nl-NL", { style: "currency", currency: "EUR" }).format(n);
@@ -437,27 +443,33 @@ function TransferCandidates({ candidates, onMerged }) {
         single transfer, so it stops counting as both income and expense.
       </div>
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-        {pending.map((c) => (
-          <div key={c.outgoingId} style={{
-            display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12,
-            padding: "9px 12px", borderRadius: 9, background: "rgba(255,255,255,0.04)", fontSize: 13,
-          }}>
-            <div style={{ minWidth: 0 }}>
-              <div style={{ fontWeight: 600 }}>{fmt(c.amount)}</div>
-              <div style={{ color: "rgba(255,255,255,0.45)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                {c.from.name} → {c.to.name} · {new Date(c.date).toLocaleDateString()}
+        {pending.map((c) => {
+          const key = keyOf(c);
+          return (
+            <div key={key} style={{
+              display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12,
+              padding: "9px 12px", borderRadius: 9, background: "rgba(255,255,255,0.04)", fontSize: 13,
+            }}>
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontWeight: 600 }}>{fmt(c.amount)}</div>
+                <div style={{ color: "rgba(255,255,255,0.45)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {c.from.name} → {c.to.name} · {new Date(c.date).toLocaleDateString()}
+                  {c.kind === "single" && (
+                    <span style={{ color: "rgba(255,255,255,0.3)" }}> · only one side imported</span>
+                  )}
+                </div>
               </div>
+              <button
+                className="glass-btn"
+                style={{ padding: "6px 14px", fontSize: 13, whiteSpace: "nowrap", opacity: busy === key ? 0.5 : 1 }}
+                onClick={() => merge(c)}
+                disabled={busy === key}
+              >
+                {busy === key ? "Working…" : c.kind === "single" ? "Make transfer" : "Merge"}
+              </button>
             </div>
-            <button
-              className="glass-btn"
-              style={{ padding: "6px 14px", fontSize: 13, whiteSpace: "nowrap", opacity: busy === c.outgoingId ? 0.5 : 1 }}
-              onClick={() => merge(c)}
-              disabled={busy === c.outgoingId}
-            >
-              {busy === c.outgoingId ? "Merging…" : "Merge"}
-            </button>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );

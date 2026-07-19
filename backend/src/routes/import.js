@@ -9,7 +9,7 @@ const { persistRows } = require("../services/importTransactions");
 const { normaliseIban } = require("../services/iban");
 const {
   MODES, getDefaultMode, applyAutoTransfers, findTransferCandidates, mergeCandidate,
-  unlinkedCounterpartyIbans,
+  unlinkedCounterpartyIbans, convertCandidate,
 } = require("../services/transfers");
 
 const router = express.Router();
@@ -242,6 +242,17 @@ router.get("/transfers/candidates", async (req, res) => {
 // reason a transfer to your own savings account is not detected.
 router.get("/transfers/unlinked-ibans", async (req, res) => {
   res.json(await unlinkedCounterpartyIbans());
+});
+
+// Convert a single imported row into a transfer (only one side was imported)
+router.post("/transfers/convert", async (req, res) => {
+  const { id } = req.body;
+  if (!id) return res.status(400).json({ error: "id required" });
+  try {
+    res.json(await convertCandidate(id));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
 });
 
 // Collapse a confirmed pair into a single TRANSFER row

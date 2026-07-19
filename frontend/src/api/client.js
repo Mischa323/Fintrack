@@ -91,6 +91,7 @@ export const importApi = {
   },
   transferCandidates: () => api.get("/import/transfers/candidates").then((r) => r.data),
   unlinkedIbans: () => api.get("/import/transfers/unlinked-ibans").then((r) => r.data),
+  convertTransfer: (id) => api.post("/import/transfers/convert", { id }).then((r) => r.data),
   mergeTransfer: (outgoingId, incomingId) =>
     api.post("/import/transfers/merge", { outgoingId, incomingId }).then((r) => r.data),
   clear: (accountId, source) =>

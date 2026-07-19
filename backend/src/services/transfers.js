@@ -230,6 +230,7 @@ async function findTransferCandidates(limit = 50) {
     const incoming = row.type === "EXPENSE" ? match : row;
 
     candidates.push({
+      kind: "pair",
       amount: Number(outgoing.amount),
       date: outgoing.date,
       from: { id: outgoing.accountId, name: accountName[outgoing.accountId] },
@@ -241,7 +242,60 @@ async function findTransferCandidates(limit = 50) {
     if (candidates.length >= limit) break;
   }
 
+  // Single-leg transfers: money moved to or from an account FinTrack knows, but
+  // only one side was ever imported. Very common when you import just your
+  // current account. One row already describes the whole transfer, so it can be
+  // converted on its own — no counterpart needed.
+  for (const row of rows) {
+    if (candidates.length >= limit) break;
+    if (used.has(row.id)) continue;
+    const counterparty = byIban.get(normaliseIban(row.counterpartyIban));
+    if (!counterparty || counterparty.id === row.accountId) continue;
+
+    const outgoing = row.type === "EXPENSE";
+    used.add(row.id);
+    candidates.push({
+      kind: "single",
+      id: row.id,
+      amount: Number(row.amount),
+      date: row.date,
+      from: outgoing
+        ? { id: row.accountId, name: accountName[row.accountId] }
+        : { id: counterparty.id, name: counterparty.name },
+      to: outgoing
+        ? { id: counterparty.id, name: counterparty.name }
+        : { id: row.accountId, name: accountName[row.accountId] },
+      description: row.description,
+    });
+  }
+
   return candidates;
+}
+
+// Turns a single imported row into a transfer. The row already carries both
+// sides (its own account and the counterparty IBAN), so nothing is deleted.
+async function convertCandidate(id) {
+  const row = await prisma.transaction.findUnique({ where: { id } });
+  if (!row) throw new Error("That transaction no longer exists");
+  if (row.type === "TRANSFER") throw new Error("This is already a transfer");
+
+  const byIban = await ibanAccountMap();
+  const counterparty = byIban.get(normaliseIban(row.counterpartyIban));
+  if (!counterparty) throw new Error("No account carries the counterparty IBAN");
+  if (counterparty.id === row.accountId) throw new Error("Counterparty is the same account");
+
+  // Money always leaves the paying account: accountId is the source.
+  const outgoing = row.type === "EXPENSE";
+  await prisma.transaction.update({
+    where: { id },
+    data: {
+      type: "TRANSFER",
+      accountId: outgoing ? row.accountId : counterparty.id,
+      toAccountId: outgoing ? counterparty.id : row.accountId,
+    },
+  });
+
+  return { id };
 }
 
 // Collapses a detected pair into a single TRANSFER row.
@@ -271,5 +325,6 @@ module.exports = {
   getDefaultMode,
   applyAutoTransfers,
   findTransferCandidates,
+  convertCandidate,
   mergeCandidate,
 };

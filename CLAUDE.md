@@ -88,7 +88,7 @@ To actually get Watchtower auto-updates, images must be published (GitHub Action
 
 `backend/package.json` `version` is the **single source of truth** — bump it on
 every meaningful change (keep `frontend/package.json` in sync for tidiness).
-Currently **1.6.0**.
+Currently **1.7.0**.
 
 - `GET /version` → `{ version, buildTime }` (authenticated)
 - `GET /version/check` → compares against the `version` in `backend/package.json`
@@ -228,10 +228,15 @@ INCOME/EXPENSE, so a linked transfer correctly stays out of income and expense.
 |---|---|
 | `off` | Everything stays INCOME/EXPENSE |
 | `auto` | Matching entries become TRANSFER rows during import |
-| `confirm` (default) | Import normally, then surface candidate pairs to merge |
+| `confirm` (default) | Import normally, then surface candidates to confirm |
 
 - Matching uses the counterparty IBAN against accounts' IBANs, amount, and a
   **±4 day** window (`MATCH_WINDOW_DAYS`).
+- Candidates come in two kinds. A **pair** is both legs imported, merged into one
+  row. A **single** is only one side imported — common when you import just your
+  current account — and is converted in place, since that row already names both
+  the account and the counterparty IBAN. Without singles, confirm mode found
+  nothing at all for anyone importing one statement.
 - In `auto`, the mirror leg is skipped when a matching TRANSFER already exists
   (`mirrorLegExists`) or was created earlier in the same batch — this is what
   stops the two statements of one transfer double-counting.
