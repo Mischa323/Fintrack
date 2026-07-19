@@ -188,41 +188,123 @@ function Alert({ type, message }) {
 // ── Theme Selector ────────────────────────────────────────────
 function ThemeSelector() {
   const { theme, setTheme, custom, setCustomColors } = useTheme();
-  const [c1, setC1] = useState(custom?.c1 || "#6366f1");
-  const [c2, setC2] = useState(custom?.c2 || "#8b5cf6");
+  const savedC1 = custom?.c1 || "#6366f1";
+  const savedC2 = custom?.c2 || "#8b5cf6";
+
+  // Selection is staged: presets and custom colors only take effect on Apply,
+  // so picking one no longer changes the whole app mid-click.
+  const [pending, setPending] = useState(theme);
+  const [c1, setC1] = useState(savedC1);
+  const [c2, setC2] = useState(savedC2);
+  const [justApplied, setJustApplied] = useState(false);
+
+  useEffect(() => { setPending(theme); }, [theme]);
+
+  const colorsChanged = c1 !== savedC1 || c2 !== savedC2;
+  const dirty = pending !== theme || (pending === "custom" && colorsChanged);
+
+  const pickColor = (setter) => (e) => {
+    setter(e.target.value);
+    setPending("custom");
+  };
+
+  const apply = () => {
+    if (pending === "custom") setCustomColors({ c1, c2 });
+    else setTheme(pending);
+    setJustApplied(true);
+    setTimeout(() => setJustApplied(false), 1800);
+  };
+
+  const reset = () => {
+    setPending(theme);
+    setC1(savedC1);
+    setC2(savedC2);
+  };
 
   return (
     <>
-      <p style={{ color: "rgba(255,255,255,0.5)", fontSize: 14, margin: "0 0 16px" }}>Pick a preset or mix your own accent colors.</p>
+      <p style={{ color: "rgba(255,255,255,0.5)", fontSize: 14, margin: "0 0 16px" }}>
+        Pick a preset or mix your own accent colors, then press Apply.
+      </p>
+
       <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10, marginBottom: 20 }}>
         {THEMES.map(t => {
+          const selected = pending === t.id;
           const active = theme === t.id;
           return (
-            <button key={t.id} onClick={() => setTheme(t.id)} style={{ border: `2px solid ${active ? "rgba(255,255,255,0.75)" : "rgba(255,255,255,0.08)"}`, borderRadius: 12, padding: 0, cursor: "pointer", overflow: "hidden", background: "none", outline: "none", transition: "border-color 0.2s" }}>
+            <button
+              key={t.id}
+              onClick={() => setPending(t.id)}
+              style={{
+                border: `2px solid ${selected ? "rgba(255,255,255,0.75)" : "rgba(255,255,255,0.08)"}`,
+                borderRadius: 12, padding: 0, cursor: "pointer", overflow: "hidden",
+                background: "none", outline: "none", transition: "border-color 0.2s",
+              }}
+            >
               <div style={{ height: 64, background: `radial-gradient(ellipse at 20% 30%, ${t.colors[0]}66 0%, transparent 60%), radial-gradient(ellipse at 80% 70%, ${t.colors[1]}55 0%, transparent 55%), ${t.base}` }} />
-              <div style={{ padding: "6px 10px 8px", background: "rgba(0,0,0,0.25)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                <span style={{ fontSize: 12, color: active ? "#fff" : "rgba(255,255,255,0.55)", fontWeight: active ? 600 : 400 }}>{t.label}</span>
-                <div style={{ display: "flex", gap: 3 }}>{t.colors.slice(0, 3).map((c, i) => <div key={i} style={{ width: 8, height: 8, borderRadius: "50%", background: c }} />)}</div>
+              <div style={{ padding: "6px 10px 8px", background: "rgba(0,0,0,0.25)", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6 }}>
+                <span style={{ fontSize: 12, color: selected ? "#fff" : "rgba(255,255,255,0.55)", fontWeight: selected ? 600 : 400, whiteSpace: "nowrap" }}>
+                  {t.label}
+                </span>
+                {active
+                  ? <span style={{ fontSize: 10, color: "#6ee7b7", whiteSpace: "nowrap" }}>in use</span>
+                  : <div style={{ display: "flex", gap: 3 }}>{t.colors.slice(0, 3).map((c, i) => <div key={i} style={{ width: 8, height: 8, borderRadius: "50%", background: c }} />)}</div>}
               </div>
             </button>
           );
         })}
       </div>
+
       <div style={{ borderTop: "1px solid rgba(255,255,255,0.08)", paddingTop: 16 }}>
         <div style={{ fontSize: 13, color: "rgba(255,255,255,0.6)", marginBottom: 10, fontWeight: 500 }}>
           Custom colors
-          {theme === "custom" && <span style={{ marginLeft: 8, fontSize: 11, color: "rgba(var(--c1),1)", background: "rgba(var(--c1),0.15)", padding: "2px 7px", borderRadius: 4 }}>active</span>}
+          {theme === "custom" && (
+            <span style={{ marginLeft: 8, fontSize: 11, color: "#6ee7b7", background: "rgba(52,211,153,0.15)", padding: "2px 7px", borderRadius: 4 }}>in use</span>
+          )}
+          {pending === "custom" && theme !== "custom" && (
+            <span style={{ marginLeft: 8, fontSize: 11, color: "#c7d2fe", background: "rgba(129,140,248,0.15)", padding: "2px 7px", borderRadius: 4 }}>selected</span>
+          )}
         </div>
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 12, alignItems: "center" }}>
+        <div
+          onClick={() => setPending("custom")}
+          style={{
+            display: "flex", flexWrap: "wrap", gap: 12, alignItems: "center",
+            padding: "10px 12px", borderRadius: 10, cursor: "pointer",
+            border: `2px solid ${pending === "custom" ? "rgba(255,255,255,0.75)" : "rgba(255,255,255,0.08)"}`,
+            transition: "border-color 0.2s",
+          }}
+        >
           <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: "rgba(255,255,255,0.6)", cursor: "pointer" }}>
-            Primary <input type="color" value={c1} onChange={e => setC1(e.target.value)} style={{ width: 36, height: 28, borderRadius: 6, border: "1px solid rgba(255,255,255,0.15)", cursor: "pointer", padding: 2, background: "transparent" }} />
+            Primary
+            <input type="color" value={c1} onChange={pickColor(setC1)} style={{ width: 36, height: 28, borderRadius: 6, border: "1px solid rgba(255,255,255,0.15)", cursor: "pointer", padding: 2, background: "transparent" }} />
           </label>
           <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: "rgba(255,255,255,0.6)", cursor: "pointer" }}>
-            Secondary <input type="color" value={c2} onChange={e => setC2(e.target.value)} style={{ width: 36, height: 28, borderRadius: 6, border: "1px solid rgba(255,255,255,0.15)", cursor: "pointer", padding: 2, background: "transparent" }} />
+            Secondary
+            <input type="color" value={c2} onChange={pickColor(setC2)} style={{ width: 36, height: 28, borderRadius: 6, border: "1px solid rgba(255,255,255,0.15)", cursor: "pointer", padding: 2, background: "transparent" }} />
           </label>
           <div style={{ width: 48, height: 28, borderRadius: 6, background: `linear-gradient(135deg, ${c1}, ${c2})`, border: "1px solid rgba(255,255,255,0.15)" }} />
-          <button className="glass-btn glass-btn-primary" style={{ padding: "5px 14px", fontSize: 13 }} onClick={() => setCustomColors({ c1, c2 })}>Apply</button>
+          <span style={{ fontSize: 12, color: "rgba(255,255,255,0.3)" }}>preview</span>
         </div>
+      </div>
+
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 18 }}>
+        <button
+          className="glass-btn glass-btn-primary"
+          style={{ padding: "9px 22px", opacity: dirty ? 1 : 0.5 }}
+          onClick={apply}
+          disabled={!dirty}
+        >
+          Apply
+        </button>
+        {dirty && (
+          <button className="glass-btn glass-btn-ghost" style={{ padding: "9px 18px" }} onClick={reset}>
+            Cancel
+          </button>
+        )}
+        {justApplied && <span style={{ fontSize: 13, color: "#34d399" }}>✓ Theme applied</span>}
+        {dirty && !justApplied && (
+          <span style={{ fontSize: 13, color: "rgba(255,255,255,0.4)" }}>Unapplied changes</span>
+        )}
       </div>
     </>
   );
