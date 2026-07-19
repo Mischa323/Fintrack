@@ -1,7 +1,10 @@
 FROM node:20-alpine AS builder
 WORKDIR /app
 COPY package*.json ./
-RUN npm ci
+# Skip lifecycle scripts: the postinstall hook runs `prisma generate` (schema not
+# copied yet) and `prisma migrate deploy` (no database at build time). The client
+# is generated explicitly below; migrations run at container start via CMD.
+RUN npm ci --ignore-scripts
 COPY prisma ./prisma
 RUN npx prisma generate
 
