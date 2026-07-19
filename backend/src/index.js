@@ -18,6 +18,7 @@ const goalsRouter = require("./routes/goals");
 const backupRouter = require("./routes/backup");
 const { processRecurring } = require("./services/recurringService");
 const { runBackup } = require("./services/backupService");
+const { initJwtSecret } = require("./services/jwtSecret");
 const { errorHandler } = require("./middleware/errorHandler");
 const authMiddleware = require("./middleware/auth");
 const { requireAdmin } = require("./middleware/auth");
@@ -57,6 +58,13 @@ cron.schedule("0 2 * * *", () => {
   runBackup().catch(console.error);
 });
 
-app.listen(PORT, () => {
-  console.log(`Finance tracker backend running on port ${PORT}`);
-});
+initJwtSecret()
+  .then(() => {
+    app.listen(PORT, () => {
+      console.log(`Finance tracker backend running on port ${PORT}`);
+    });
+  })
+  .catch((err) => {
+    console.error("Failed to initialize JWT secret:", err);
+    process.exit(1);
+  });

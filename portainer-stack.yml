@@ -1,0 +1,68 @@
+# FinTrack — Portainer stack
+# Deploy via Portainer → Stacks → Add stack → "Repository"
+#   Repository URL:  https://github.com/Mischa323/fintrack
+#   Reference:       refs/heads/master
+#   Compose path:    portainer-stack.yml
+# Then set the environment variables below in Portainer's "Environment variables" section.
+#
+# Because the images are built from source, use the Repository method (not the web
+# editor) so Portainer has the code to run the `build:` steps.
+
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: finance-backend
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: file:/app/data/finance.db
+      PORT: "3001"
+      NODE_ENV: production
+      # Optional — leave unset and the app generates a strong secret on first boot
+      # and stores it in the database (persists across redeploys via the db_data
+      # volume). Only set this if you want to pin the secret externally.
+      JWT_SECRET: ${JWT_SECRET:-}
+      # Optional — only needed for OIDC / Google SSO callbacks. Set to your public URL,
+      # e.g. https://finance.example.com . Leave blank if you don't use SSO.
+      FRONTEND_URL: ${FRONTEND_URL:-}
+      APP_URL: ${APP_URL:-}
+    networks:
+      - finance-net
+    volumes:
+      - db_data:/app/data
+      - uploads_data:/app/uploads
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_API_URL: /api
+    container_name: finance-frontend
+    restart: unless-stopped
+    networks:
+      - finance-net
+
+  nginx:
+    image: nginx:alpine
+    container_name: finance-nginx
+    restart: unless-stopped
+    ports:
+      # Host port you browse to. Change WEB_PORT in Portainer if 8080 is taken.
+      - "${WEB_PORT:-8080}:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - backend
+      - frontend
+    networks:
+      - finance-net
+
+volumes:
+  db_data:       # SQLite database — persists across redeploys
+  uploads_data:  # temporary CSV/import upload staging
+
+networks:
+  finance-net:
+    driver: bridge

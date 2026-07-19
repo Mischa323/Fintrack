@@ -1,6 +1,5 @@
 const jwt = require("jsonwebtoken");
-
-const JWT_SECRET = process.env.JWT_SECRET || "fintrack-dev-secret-change-in-production";
+const { getJwtSecret } = require("../services/jwtSecret");
 
 function authMiddleware(req, res, next) {
   const header = req.headers.authorization;
@@ -8,7 +7,7 @@ function authMiddleware(req, res, next) {
     return res.status(401).json({ error: "Unauthorized" });
   }
   try {
-    req.user = jwt.verify(header.slice(7), JWT_SECRET);
+    req.user = jwt.verify(header.slice(7), getJwtSecret());
     next();
   } catch {
     res.status(401).json({ error: "Invalid or expired token" });

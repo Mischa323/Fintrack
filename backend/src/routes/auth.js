@@ -6,11 +6,11 @@ const QRCode = require("qrcode");
 const { Issuer, generators } = require("openid-client");
 const { PrismaClient } = require("@prisma/client");
 const authMiddleware = require("../middleware/auth");
+const { getJwtSecret } = require("../services/jwtSecret");
 
 const router = express.Router();
 const prisma = new PrismaClient();
 
-const JWT_SECRET = process.env.JWT_SECRET || "fintrack-dev-secret-change-in-production";
 const APP_NAME = "FinTrack";
 
 const oidcClientCache = new Map();
@@ -19,7 +19,7 @@ const googleClientCache = new Map();
 function signToken(user) {
   return jwt.sign(
     { userId: user.id, username: user.username, role: user.role },
-    JWT_SECRET,
+    getJwtSecret(),
     { expiresIn: "7d" }
   );
 }
