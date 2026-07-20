@@ -1,8 +1,25 @@
 import { useState, useEffect } from "react";
-import { categories as catsApi } from "../api/client";
+import { categories as catsApi, ai as aiApi } from "../api/client";
 import GlassCard from "../components/GlassCard";
 
-const COLORS = ["#6366f1", "#8b5cf6", "#ec4899", "#f59e0b", "#10b981", "#3b82f6", "#ef4444", "#14b8a6", "#f97316", "#06b6d4"];
+// Category colours are also the slice colours of the dashboard's spending chart,
+// so they have to stay apart from each other on a dark surface.
+//
+// The first eight were validated against that surface: every pair clears the
+// colourblind and normal-vision separation floors (worst adjacent ΔE 8.4 CVD /
+// 19.3 normal). The old set failed badly — indigo and violet measured ΔE 0.8 for
+// red-green colourblindness and 6.3 for full colour vision, effectively the same
+// colour. Past eight hues no ordering can clear the floors, so the extras below
+// are exactly that: still usable, but the chart leans on its labels and tooltip
+// for identity rather than hue alone.
+const COLORS = [
+  "#3987e5", "#008300", "#d55181", "#c98500",
+  "#199e70", "#d95926", "#9085e9", "#e66767",
+];
+const EXTRA_COLORS = [
+  "#1f9ab5", "#9a5fd0", "#6f9e1c", "#c2703a",
+  "#e0679e", "#4aa3d6", "#b06a00", "#5b74d1",
+];
 const ICONS = ["🏠", "🍔", "🚗", "💪", "🎬", "🛍️", "⚡", "💰", "🏦", "📦", "✈️", "🎓", "💊", "🎮", "🍕", "📱"];
 
 const emptyForm = { name: "", color: "#6366f1", icon: "📦" };
@@ -161,6 +178,138 @@ function MergeModal({ onClose, onDone }) {
   );
 }
 
+// ── AI merge suggestions ─────────────────────────────────────────────────────
+// The model spots categories that are really one specific thing sitting beside a
+// broader heading. It is right often enough to be useful and wrong often enough
+// that its reasoning is shown and nothing merges without being ticked.
+function AiMergeModal({ onClose, onDone }) {
+  const [state, setState] = useState({ phase: "loading" });
+  const [groups, setGroups] = useState([]);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    aiApi.suggestCategories()
+      .then((r) => {
+        if (cancelled) return;
+        setGroups(r.groups.map((g, i) => ({ ...g, key: i, accepted: false })));
+        setState({ phase: "review" });
+      })
+      .catch((e) => {
+        if (!cancelled) setState({ phase: "error", error: e.response?.data?.error || e.message });
+      });
+    return () => { cancelled = true; };
+  }, []);
+
+  const toggle = (key) =>
+    setGroups((gs) => gs.map((g) => (g.key === key ? { ...g, accepted: !g.accepted } : g)));
+
+  const chosen = groups.filter((g) => g.accepted);
+
+  const applyAll = async () => {
+    setBusy(true);
+    let merged = 0;
+    let moved = 0;
+    try {
+      for (const g of chosen) {
+        const res = await catsApi.merge(g.sources.map((s) => s.id), g.targetId);
+        merged += res.merged;
+        moved += res.movedTransactions;
+      }
+      onDone(`Merged ${merged} categor${merged === 1 ? "y" : "ies"}${moved ? `, ${moved} transactions moved` : ""}`);
+    } catch (e) {
+      setState({ phase: "error", error: e.response?.data?.error || e.message });
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="modal-overlay" onClick={(e) => e.target === e.currentTarget && onClose()}>
+      <div className="glass-strong" style={{ width: 620, maxWidth: "95vw", maxHeight: "90vh", padding: 28, display: "flex", flexDirection: "column" }}>
+        <h2 style={{ margin: 0, fontSize: 18 }}>Suggested merges</h2>
+        <p style={{ margin: "4px 0 0", fontSize: 13, color: "rgba(255,255,255,0.45)", lineHeight: 1.6 }}>
+          Your local model looked for categories that are one specific thing next to a broader
+          one. Its reasoning is shown for each — it gets some of these plainly wrong, so tick only
+          what you agree with.
+        </p>
+
+        {state.phase === "loading" && (
+          <div style={{ padding: "36px 0", textAlign: "center", color: "rgba(255,255,255,0.4)", fontSize: 14 }}>
+            Thinking…
+          </div>
+        )}
+
+        {state.phase === "error" && (
+          <div style={{ marginTop: 18, padding: "14px 16px", borderRadius: 10, background: "rgba(239,68,68,0.1)", border: "1px solid rgba(248,113,113,0.35)", fontSize: 13, color: "#f87171", lineHeight: 1.6 }}>
+            {state.error}
+          </div>
+        )}
+
+        {state.phase === "review" && groups.length === 0 && (
+          <div style={{ padding: "36px 0", textAlign: "center", color: "rgba(255,255,255,0.35)", fontSize: 14 }}>
+            Nothing suggested — your categories look distinct enough.
+          </div>
+        )}
+
+        {state.phase === "review" && groups.length > 0 && (
+          <>
+            <div style={{ flex: 1, overflowY: "auto", marginTop: 16, display: "flex", flexDirection: "column", gap: 8 }}>
+              {groups.map((g) => (
+                <label
+                  key={g.key}
+                  style={{
+                    display: "flex", alignItems: "flex-start", gap: 10, padding: "11px 13px",
+                    borderRadius: 10, cursor: "pointer", fontSize: 13, lineHeight: 1.6,
+                    background: g.accepted ? "rgba(99,102,241,0.15)" : "rgba(255,255,255,0.04)",
+                    border: `1px solid ${g.accepted ? "rgba(129,140,248,0.5)" : "transparent"}`,
+                  }}
+                >
+                  <input type="checkbox" checked={g.accepted} onChange={() => toggle(g.key)} style={{ marginTop: 3 }} />
+                  <div style={{ minWidth: 0 }}>
+                    <div>
+                      <strong>{g.sources.map((s) => s.name).join(", ")}</strong>
+                      <span style={{ color: "rgba(255,255,255,0.4)" }}> → </span>
+                      <strong style={{ color: "#c7d2fe" }}>{g.targetName}</strong>
+                    </div>
+                    <div style={{ color: "rgba(255,255,255,0.4)" }}>
+                      {g.movedTransactions} transaction{g.movedTransactions === 1 ? "" : "s"} would move
+                    </div>
+                    {g.why && (
+                      <div style={{ color: "rgba(255,255,255,0.35)", fontStyle: "italic", marginTop: 2 }}>
+                        “{g.why}”
+                      </div>
+                    )}
+                  </div>
+                </label>
+              ))}
+            </div>
+
+            <div style={{ marginTop: 14, padding: "10px 13px", borderRadius: 9, fontSize: 12, color: "rgba(251,191,36,0.85)", background: "rgba(251,191,36,0.07)", border: "1px solid rgba(251,191,36,0.2)", lineHeight: 1.6 }}>
+              Merging deletes the categories on the left and moves their transactions. This cannot be undone.
+            </div>
+          </>
+        )}
+
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 18 }}>
+          <button className="glass-btn glass-btn-ghost" style={{ padding: "9px 18px" }} onClick={onClose}>
+            {state.phase === "review" && groups.length > 0 ? "Cancel" : "Close"}
+          </button>
+          {state.phase === "review" && groups.length > 0 && (
+            <button
+              className="glass-btn glass-btn-primary"
+              style={{ padding: "9px 20px", opacity: (!chosen.length || busy) ? 0.5 : 1 }}
+              onClick={applyAll}
+              disabled={!chosen.length || busy}
+            >
+              {busy ? "Merging…" : `Merge ${chosen.length}`}
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function Categories() {
   const [items, setItems] = useState([]);
   const [modal, setModal] = useState(false);
@@ -169,6 +318,7 @@ export default function Categories() {
   const [seeding, setSeeding] = useState(false);
   const [merging, setMerging] = useState(false);
   const [mergeResult, setMergeResult] = useState(null);
+  const [aiMerge, setAiMerge] = useState(false);
 
   const load = () => catsApi.list().then(setItems);
   useEffect(() => { load(); }, []);
@@ -215,6 +365,9 @@ export default function Categories() {
           <button className="glass-btn glass-btn-ghost" style={{ padding: "10px 20px" }} onClick={loadDefaults} disabled={seeding}>
             {seeding ? "Loading…" : "Load defaults"}
           </button>
+          <button className="glass-btn glass-btn-ghost" style={{ padding: "10px 20px" }} onClick={() => { setMergeResult(null); setAiMerge(true); }} title="Let your local model look for categories that belong together">
+            ✨ Suggest
+          </button>
           <button className="glass-btn glass-btn-ghost" style={{ padding: "10px 20px" }} onClick={() => { setMergeResult(null); setMerging(true); }}>
             ⇥ Merge
           </button>
@@ -225,9 +378,13 @@ export default function Categories() {
       {mergeResult && (
         <div style={{ borderRadius: 12, padding: "12px 16px", fontSize: 14, background: "rgba(52,211,153,0.12)", border: "1px solid rgba(52,211,153,0.3)", color: "#34d399", display: "flex", justifyContent: "space-between", gap: 12 }}>
           <div>
-            ✓ Merged {mergeResult.merged} categor{mergeResult.merged === 1 ? "y" : "ies"} into “{mergeResult.target}”
-            {mergeResult.movedTransactions > 0 && ` — ${mergeResult.movedTransactions} transaction${mergeResult.movedTransactions === 1 ? "" : "s"} moved`}
-            {mergeResult.detachedTarget && ` · “${mergeResult.target}” is now a top-level category`}
+            {mergeResult.text ? `✓ ${mergeResult.text}` : (
+              <>
+                ✓ Merged {mergeResult.merged} categor{mergeResult.merged === 1 ? "y" : "ies"} into “{mergeResult.target}”
+                {mergeResult.movedTransactions > 0 && ` — ${mergeResult.movedTransactions} transaction${mergeResult.movedTransactions === 1 ? "" : "s"} moved`}
+                {mergeResult.detachedTarget && ` · “${mergeResult.target}” is now a top-level category`}
+              </>
+            )}
           </div>
           <button onClick={() => setMergeResult(null)} style={{ background: "none", border: "none", color: "rgba(255,255,255,0.3)", cursor: "pointer", padding: 0, fontSize: 16 }}>×</button>
         </div>
@@ -260,6 +417,13 @@ export default function Categories() {
         ))}
       </div>
 
+      {aiMerge && (
+        <AiMergeModal
+          onClose={() => setAiMerge(false)}
+          onDone={(text) => { setAiMerge(false); setMergeResult({ merged: 0, target: "", movedTransactions: 0, text }); load(); }}
+        />
+      )}
+
       {merging && (
         <MergeModal
           onClose={() => setMerging(false)}
@@ -277,8 +441,26 @@ export default function Categories() {
                 <div style={{ fontSize: 12, color: "rgba(255,255,255,0.5)", marginBottom: 8 }}>Color</div>
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                   {COLORS.map((c) => (
-                    <div key={c} onClick={() => setForm({ ...form, color: c })} style={{ width: 28, height: 28, borderRadius: 8, background: c, cursor: "pointer", border: form.color === c ? "2px solid white" : "2px solid transparent" }} />
+                    <div key={c} onClick={() => setForm({ ...form, color: c })} title="Stays distinct in the spending chart" style={{ width: 28, height: 28, borderRadius: 8, background: c, cursor: "pointer", border: form.color === c ? "2px solid white" : "2px solid transparent" }} />
                   ))}
+                </div>
+
+                <div style={{ fontSize: 11, color: "rgba(255,255,255,0.35)", margin: "10px 0 6px" }}>
+                  More colors — harder to tell apart in the chart
+                </div>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                  {EXTRA_COLORS.map((c) => (
+                    <div key={c} onClick={() => setForm({ ...form, color: c })} style={{ width: 24, height: 24, borderRadius: 7, background: c, cursor: "pointer", border: form.color === c ? "2px solid white" : "2px solid transparent" }} />
+                  ))}
+                  <label title="Pick any color" style={{ display: "flex", alignItems: "center", gap: 6, marginLeft: 4, cursor: "pointer" }}>
+                    <input
+                      type="color"
+                      value={form.color}
+                      onChange={(e) => setForm({ ...form, color: e.target.value })}
+                      style={{ width: 28, height: 24, borderRadius: 7, border: "1px solid rgba(255,255,255,0.2)", background: "transparent", cursor: "pointer", padding: 1 }}
+                    />
+                    <span style={{ fontSize: 11, color: "rgba(255,255,255,0.35)" }}>custom</span>
+                  </label>
                 </div>
               </div>
               <div>

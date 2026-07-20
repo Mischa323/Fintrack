@@ -1,5 +1,7 @@
 const express = require("express");
-const { checkConnection, suggestForTransactions, applySuggestions } = require("../services/ai");
+const {
+  checkConnection, suggestForTransactions, applySuggestions, suggestCategoryMerges,
+} = require("../services/ai");
 
 const router = express.Router();
 
@@ -28,6 +30,16 @@ router.post("/apply", async (req, res) => {
   const changes = Array.isArray(req.body.changes) ? req.body.changes : [];
   if (changes.length === 0) return res.status(400).json({ error: "Nothing to apply" });
   res.json(await applySuggestions(changes));
+});
+
+// POST /ai/categories/suggest - which categories look like they belong together.
+// Proposes only; merging still goes through POST /categories/merge.
+router.post("/categories/suggest", async (req, res) => {
+  try {
+    res.json(await suggestCategoryMerges());
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
 });
 
 module.exports = router;

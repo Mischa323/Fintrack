@@ -113,12 +113,22 @@ async function askModel(url, model, prompt) {
     if (!response.ok) throw new Error(`Ollama returned HTTP ${response.status}`);
     const data = await response.json();
     // Asking for a wrapped array is what makes small models return every row
-    // instead of stopping after the first object.
-    const parsed = JSON.parse(data.response);
-    return Array.isArray(parsed) ? parsed : parsed.results || [];
+    // instead of stopping after the first object. The wrapper key differs per
+    // prompt, so unwrapping is left to the caller.
+    return JSON.parse(data.response);
   } finally {
     clearTimeout(timer);
   }
+}
+
+// Small models sometimes answer with a bare array, sometimes with the wrapper
+// they were asked for, and occasionally with a differently named wrapper.
+function unwrap(parsed, key) {
+  if (Array.isArray(parsed)) return parsed;
+  if (!parsed || typeof parsed !== "object") return [];
+  if (Array.isArray(parsed[key])) return parsed[key];
+  const firstArray = Object.values(parsed).find((v) => Array.isArray(v));
+  return firstArray || [];
 }
 
 // Returns one suggestion per transaction that the model answered for. Anything
@@ -151,7 +161,7 @@ async function suggestForTransactions(transactionIds) {
 
     let answers;
     try {
-      answers = await askModel(url, model, buildPrompt(rows, names));
+      answers = unwrap(await askModel(url, model, buildPrompt(rows, names)), "results");
     } catch {
       failed += batch.length;
       continue;
@@ -180,6 +190,79 @@ async function suggestForTransactions(transactionIds) {
   return { suggestions, failed, model };
 }
 
+// Proposes which categories cover the same ground and could be folded together.
+// Imports create a category per name encountered, so lists drift into things like
+// "Renault Megane" and "Simkaart" sitting beside "Transportation".
+async function suggestCategoryMerges() {
+  const { url, model } = await getConfig();
+  if (!model) throw new Error("No model configured — set one in Settings first");
+
+  const categories = await prisma.category.findMany({
+    select: {
+      id: true, name: true,
+      _count: { select: { transactions: true } },
+    },
+    orderBy: { name: "asc" },
+  });
+  if (categories.length < 2) return { groups: [] };
+
+  const byName = new Map(categories.map((c) => [c.name.trim().toLowerCase(), c]));
+
+  // Phrased as "find the specific ones" rather than "merge if you think you
+  // should" — offered the easy way out, a small model returns an empty list
+  // every time.
+  const prompt = [
+    "A personal finance app built this category list automatically while importing",
+    "bank data, so some entries are one specific thing (a car model, a phone plan, a",
+    "shop) that really belongs under a broader category already in the list.",
+    "",
+    "Go through the list and find those. For each one, say which broader category in",
+    "the list it should live under.",
+    "",
+    "Rules:",
+    "- Both names must be copied exactly from the list",
+    "- Keep the broader, reusable one; merge away the specific one",
+    "- A brand or product name is almost always the specific one",
+    "- Leave a category alone if no broader match exists in the list",
+    "",
+    "The list:",
+    ...categories.map((c) => `- ${c.name}`),
+    "",
+    "Example of the reasoning: a category named after one supermarket belongs under a",
+    "general groceries or food category; a category named after one insurance policy",
+    "belongs under Insurance.",
+    "",
+    'Answer: {"groups":[{"keep":"<broad name from list>","merge":["<specific name from list>"],"why":"<short reason>"}]}',
+  ].join("\n");
+
+  const raw = unwrap(await askModel(url, model, prompt), "groups");
+
+  const groups = [];
+  const used = new Set();
+  for (const group of raw) {
+    const target = byName.get(String(group.keep || "").trim().toLowerCase());
+    if (!target || used.has(target.id)) continue;
+
+    // Only names that actually exist, never the target itself, never reused
+    const sources = (Array.isArray(group.merge) ? group.merge : [])
+      .map((n) => byName.get(String(n || "").trim().toLowerCase()))
+      .filter((c) => c && c.id !== target.id && !used.has(c.id));
+    if (sources.length === 0) continue;
+
+    used.add(target.id);
+    for (const s of sources) used.add(s.id);
+    groups.push({
+      targetId: target.id,
+      targetName: target.name,
+      sources: sources.map((c) => ({ id: c.id, name: c.name, count: c._count.transactions })),
+      why: String(group.why || "").slice(0, 200) || null,
+      movedTransactions: sources.reduce((n, c) => n + c._count.transactions, 0),
+    });
+  }
+
+  return { groups, model };
+}
+
 // Applies only what was handed back, so the review step stays authoritative.
 async function applySuggestions(changes) {
   let updated = 0;
@@ -198,4 +281,10 @@ async function applySuggestions(changes) {
   return { updated };
 }
 
-module.exports = { checkConnection, suggestForTransactions, applySuggestions, getConfig };
+module.exports = {
+  checkConnection,
+  suggestForTransactions,
+  applySuggestions,
+  suggestCategoryMerges,
+  getConfig,
+};

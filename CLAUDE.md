@@ -88,7 +88,7 @@ To actually get Watchtower auto-updates, images must be published (GitHub Action
 
 `backend/package.json` `version` is the **single source of truth** — bump it on
 every meaningful change (keep `frontend/package.json` in sync for tidiness).
-Currently **1.13.1**.
+Currently **1.14.0**.
 
 - `GET /version` → `{ version, buildTime }` (authenticated)
 - `GET /version/check` → compares against the `version` in `backend/package.json`
@@ -144,6 +144,18 @@ transactions from all accounts landed on one.
   fallback for rows with no account name, so single-account files still work.
 - An unmapped group is **skipped and reported**, never silently redirected.
 
+## Category colours (also the spending-chart palette)
+
+Category colours double as the dashboard pie slices, so they must stay distinct
+on the dark chart surface. The first eight ( `COLORS`) were
+validated with the dataviz skill: worst adjacent CVD ΔE 8.4, normal-vision 19.3.
+The previous set failed hard — indigo vs violet measured ΔE 0.8 (colourblind) /
+6.3 (normal), effectively identical. Past eight hues no ordering clears the
+floors, so `EXTRA_COLORS` and the free colour picker are offered as "harder to
+tell apart" — the chart leans on labels and tooltips there, not hue. Re-validate
+with `dataviz/scripts/validate_palette.js` against surface `#12263a` before
+changing these.
+
 ## Local AI (Ollama)
 
 Optional: point FinTrack at an Ollama the user runs to suggest categories and
@@ -160,6 +172,12 @@ tidy imported transaction descriptions. Configured in Settings → Local AI
   (observed: `Zorgverzkekering` → `Zorgverzekeringsmaandag`).
 - A suggested category that does not exist is rejected and reported rather than
   created, so the model cannot invent categories.
+- `POST /ai/categories/suggest` proposes category **merges** (a specific category
+  folded into a broader one); the UI shows each with the model reasoning and
+  merges via `POST /categories/merge`. Phrase the prompt as "find the specific
+  ones", not "merge if you think you should" — offered the easy out, a 7B model
+  returns an empty list every time. `unwrap()` tolerates bare arrays and any
+  wrapper key, since the model is inconsistent about which it uses.
 - The container cannot reach the host on `localhost`; default is
   `host.docker.internal:11434`, and Ollama needs `OLLAMA_HOST=0.0.0.0`.
 - The prompt carries category hints (fuel -> Transportation, supermarkets ->

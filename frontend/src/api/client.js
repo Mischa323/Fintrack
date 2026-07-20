@@ -133,6 +133,7 @@ export const ai = {
   status: () => api.get("/ai/status").then((r) => r.data),
   suggest: (ids) => api.post("/ai/suggest", { ids }).then((r) => r.data),
   apply: (changes) => api.post("/ai/apply", { changes }).then((r) => r.data),
+  suggestCategories: () => api.post("/ai/categories/suggest").then((r) => r.data),
 };
 
 export const goals = {
