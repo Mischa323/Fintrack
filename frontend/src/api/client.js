@@ -129,6 +129,12 @@ export const holdings = {
   },
 };
 
+export const ai = {
+  status: () => api.get("/ai/status").then((r) => r.data),
+  suggest: (ids) => api.post("/ai/suggest", { ids }).then((r) => r.data),
+  apply: (changes) => api.post("/ai/apply", { changes }).then((r) => r.data),
+};
+
 export const goals = {
   list: () => api.get("/goals").then((r) => r.data),
   create: (data) => api.post("/goals", data).then((r) => r.data),

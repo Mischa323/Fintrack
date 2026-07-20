@@ -18,6 +18,7 @@ const goalsRouter = require("./routes/goals");
 const backupRouter = require("./routes/backup");
 const versionRouter = require("./routes/version");
 const holdingsRouter = require("./routes/holdings");
+const aiRouter = require("./routes/ai");
 const { processRecurring } = require("./services/recurringService");
 const { runBackup } = require("./services/backupService");
 const { initJwtSecret } = require("./services/jwtSecret");
@@ -50,6 +51,7 @@ app.use("/goals", goalsRouter);
 app.use("/backup", requireAdmin, backupRouter);
 app.use("/version", versionRouter);
 app.use("/holdings", holdingsRouter);
+app.use("/ai", aiRouter);
 
 app.get("/health", (_, res) => res.json({ status: "ok" }));
 

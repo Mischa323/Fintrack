@@ -88,7 +88,7 @@ To actually get Watchtower auto-updates, images must be published (GitHub Action
 
 `backend/package.json` `version` is the **single source of truth** — bump it on
 every meaningful change (keep `frontend/package.json` in sync for tidiness).
-Currently **1.12.0**.
+Currently **1.13.0**.
 
 - `GET /version` → `{ version, buildTime }` (authenticated)
 - `GET /version/check` → compares against the `version` in `backend/package.json`
@@ -143,6 +143,27 @@ transactions from all accounts landed on one.
   grouped by account name and persisted per group. `accountId` remains the
   fallback for rows with no account name, so single-account files still work.
 - An unmapped group is **skipped and reported**, never silently redirected.
+
+## Local AI (Ollama)
+
+Optional: point FinTrack at an Ollama the user runs to suggest categories and
+tidy imported transaction descriptions. Configured in Settings -> Local AI
+(, ); nothing is sent anywhere else.
+
+-  batches 20 transactions per request, temperature 0,
+  .
+- **Ask for a wrapped array** (). With a bare array a 7B model
+  returns only the first object — measured: 1 of 8 rows.
+- Suggestions are **never applied automatically**.  proposes,
+  the UI shows each next to the original,  writes only what was
+  confirmed. Small models misfile categories and do occasionally invent a word
+  (observed: Zorgverzkekering -> Zorgverzekeringsmaandag).
+- A suggested category that does not exist is rejected and reported rather than
+  created, so the model cannot invent categories.
+- The container cannot reach the host on ; default is
+  , and Ollama needs .
+- The prompt carries category hints (fuel -> Transportation, supermarkets ->
+  Groceries) because without them a 7B model filed petrol under Utilities.
 
 ## Investments (holdings)
 

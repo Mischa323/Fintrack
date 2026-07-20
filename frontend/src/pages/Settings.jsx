@@ -593,6 +593,116 @@ function ServerConfig() {
   );
 }
 
+// ── Local AI (Ollama) ─────────────────────────────────────────
+function AiConfig() {
+  const [config, setConfig] = useState({ aiUrl: "", aiModel: "" });
+  const [loaded, setLoaded] = useState(false);
+  const [status, setStatus] = useState(null);
+  const [testing, setTesting] = useState(false);
+  const [msg, setMsg] = useState(null);
+
+  const check = () => {
+    setTesting(true);
+    api.get("/ai/status")
+      .then((r) => setStatus(r.data))
+      .catch((e) => setStatus({ ok: false, error: e.response?.data?.error || e.message }))
+      .finally(() => setTesting(false));
+  };
+
+  useEffect(() => {
+    api.get("/config").then((r) => {
+      setConfig({ aiUrl: r.data.aiUrl ?? "", aiModel: r.data.aiModel ?? "" });
+      setLoaded(true);
+      check();
+    });
+  }, []);
+
+  const save = async (e) => {
+    e.preventDefault();
+    setMsg(null);
+    try {
+      await api.put("/config", { aiUrl: config.aiUrl, aiModel: config.aiModel });
+      setMsg({ type: "success", text: "Saved" });
+      check();
+    } catch (err) {
+      setMsg({ type: "error", text: err.response?.data?.error || "Failed to save" });
+    }
+  };
+
+  if (!loaded) return <p style={{ color: "rgba(255,255,255,0.4)", fontSize: 14 }}>Loading…</p>;
+
+  return (
+    <form onSubmit={save}>
+      <p style={{ color: "rgba(255,255,255,0.5)", fontSize: 14, margin: "0 0 16px", lineHeight: 1.7 }}>
+        Point FinTrack at an Ollama you run yourself to suggest categories and tidy up imported
+        transaction names. Your transactions are sent only to that address — never to a third party.
+        Suggestions are always shown for review before anything changes.
+      </p>
+
+      <Alert type={msg?.type} message={msg?.text} />
+
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+        <Field label="Ollama address">
+          <input
+            className="glass-input" style={inp}
+            value={config.aiUrl}
+            onChange={(e) => setConfig((c) => ({ ...c, aiUrl: e.target.value }))}
+            placeholder="http://host.docker.internal:11434"
+          />
+        </Field>
+        <Field label="Model">
+          {status?.models?.length > 0 ? (
+            <select
+              className="glass-input" style={inp}
+              value={config.aiModel}
+              onChange={(e) => setConfig((c) => ({ ...c, aiModel: e.target.value }))}
+            >
+              <option value="">Select a model…</option>
+              {status.models.map((m) => <option key={m} value={m}>{m}</option>)}
+            </select>
+          ) : (
+            <input
+              className="glass-input" style={inp}
+              value={config.aiModel}
+              onChange={(e) => setConfig((c) => ({ ...c, aiModel: e.target.value }))}
+              placeholder="llama3.2 or qwen2.5"
+            />
+          )}
+        </Field>
+      </div>
+
+      <div style={{
+        marginTop: 6, marginBottom: 16, padding: "12px 14px", borderRadius: 10, fontSize: 13, lineHeight: 1.6,
+        background: status?.ok ? "rgba(52,211,153,0.1)" : "rgba(251,191,36,0.08)",
+        border: `1px solid ${status?.ok ? "rgba(52,211,153,0.3)" : "rgba(251,191,36,0.25)"}`,
+        color: status?.ok ? "#34d399" : "#fbbf24",
+      }}>
+        {testing
+          ? "Checking…"
+          : status?.ok
+            ? `Connected — ${status.models.length} model${status.models.length === 1 ? "" : "s"} available`
+            : status?.error || "Not configured yet"}
+      </div>
+
+      <div style={{ fontSize: 12, color: "rgba(255,255,255,0.35)", lineHeight: 1.7, marginBottom: 16 }}>
+        FinTrack runs in a container, so <code>localhost</code> means the container itself, not your PC.
+        Use <code>http://host.docker.internal:11434</code>, or your machine's LAN address such as{" "}
+        <code>http://192.168.1.20:11434</code>. Ollama must accept connections from outside localhost —
+        set <code>OLLAMA_HOST=0.0.0.0</code> if the address refuses.
+      </div>
+
+      <div style={{ display: "flex", gap: 10 }}>
+        <button type="submit" className="glass-btn glass-btn-primary" style={{ padding: "9px 20px" }}>
+          Save
+        </button>
+        <button type="button" className="glass-btn glass-btn-ghost" style={{ padding: "9px 20px" }} onClick={check} disabled={testing}>
+          {testing ? "Testing…" : "Test connection"}
+        </button>
+      </div>
+    </form>
+  );
+}
+
 // ── SSO / Microsoft ──────────────────────────────────────────
 function SsoConfig() {
   const [cfg, setCfg] = useState({ oidcEnabled: false, oidcTenantId: "", oidcClientId: "", oidcClientSecret: "", hasOidcClientSecret: false });
@@ -844,6 +954,7 @@ const NAV_TABS = [
   { id: "security",   label: "Security",   icon: "🔐" },
   { id: "users",      label: "Users",      icon: "👥", adminOnly: true },
   { id: "server",     label: "Server",     icon: "⚙",  adminOnly: true },
+  { id: "ai",         label: "Local AI",   icon: "✨", adminOnly: true },
   { id: "sso",        label: "SSO",        icon: "🔑", adminOnly: true },
   { id: "backups",    label: "Backups",    icon: "💾", adminOnly: true },
 ];
@@ -991,6 +1102,13 @@ export default function Settings() {
           <>
             <SectionTitle>Server configuration</SectionTitle>
             <ServerConfig />
+          </>
+        )}
+
+        {isAdmin && activeTab === "ai" && (
+          <>
+            <SectionTitle>Local AI (Ollama)</SectionTitle>
+            <AiConfig />
           </>
         )}
 

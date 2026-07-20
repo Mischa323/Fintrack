@@ -135,6 +135,9 @@ model Settings {
   googleOidcEnabled  Boolean  @default(false)
   googleClientId     String?
   googleClientSecret String?
+  // Local Ollama used to suggest categories and clean up descriptions
+  aiUrl              String?
+  aiModel            String?
   // How imports handle transfers between two known accounts: off | auto | confirm
   transferDetection  String   @default("confirm")
   createdAt          DateTime @default(now())
