@@ -311,26 +311,58 @@ function StepMaybeAccounts({ onDone, onBack }) {
 }
 
 // ── Maybe step 3: transactions.csv ───────────────────────────────────────────
+// A Maybe export contains every account in one file, so the file is inspected
+// first and each account it names is mapped to a FinTrack account.
 function StepMaybeTransactions({ onBack }) {
   const [accounts, setAccounts] = useState([]);
-  const [accountId, setAccountId] = useState("");
   const [file, setFile] = useState(null);
+  const [preview, setPreview] = useState(null);
+  const [mapping, setMapping] = useState({});
+  const [inspecting, setInspecting] = useState(false);
   const [loading, setLoading] = useState(false);
   const [clearing, setClearing] = useState(false);
   const [result, setResult] = useState(null);
   const fileRef = useRef();
 
-  useEffect(() => {
-    accountsApi.list().then((a) => { setAccounts(a); if (a[0]) setAccountId(a[0].id); });
-  }, []);
+  useEffect(() => { accountsApi.list().then(setAccounts); }, []);
+
+  const handleFile = async (f) => {
+    setFile(f);
+    setPreview(null);
+    setMapping({});
+    setResult(null);
+    if (!f) return;
+    setInspecting(true);
+    try {
+      const info = await importApi.maybeInspect(f);
+      setPreview(info);
+      // Pre-fill with whatever matched by name; the rest is left for the user
+      const initial = {};
+      for (const g of info.groups) {
+        if (g.name && g.matchedAccount) initial[g.name] = g.matchedAccount.id;
+      }
+      setMapping(initial);
+    } catch (e) {
+      setResult({ error: true, message: e.response?.data?.error || e.message });
+    } finally {
+      setInspecting(false);
+    }
+  };
+
+  const named = (preview?.groups || []).filter((g) => g.name);
+  const unnamed = (preview?.groups || []).find((g) => !g.name);
+  const unmapped = named.filter((g) => !mapping[g.name]);
 
   const handleImport = async () => {
-    if (!file || !accountId) return;
+    if (!file) return;
     setLoading(true);
     setResult(null);
     try {
-      const res = await importApi.maybe(accountId, file);
-      setResult({ message: `✓ ${res.imported} transactions imported${res.skipped ? `, ${res.skipped} skipped` : ""}` });
+      // Rows without an account name fall back to the account chosen for them
+      const res = await importApi.maybe(mapping.__fallback__ || null, file, mapping);
+      const lines = [`✓ ${res.imported} transactions imported`];
+      if (res.skipped) lines.push(`${res.skipped} skipped`);
+      setResult({ message: lines.join(", "), perAccount: res.perAccount, errors: res.errors });
     } catch (e) {
       setResult({ error: true, message: e.response?.data?.error || e.message });
     } finally {
@@ -339,13 +371,14 @@ function StepMaybeTransactions({ onBack }) {
   };
 
   const handleClear = async () => {
-    if (!accountId) return;
-    if (!window.confirm("Delete all Maybe Finance imported transactions for this account?")) return;
+    const target = mapping.__fallback__ || Object.values(mapping)[0];
+    if (!target) return;
+    if (!window.confirm("Delete all Maybe Finance imported transactions for that account?")) return;
     setClearing(true);
     setResult(null);
     try {
-      const res = await importApi.clear(accountId, "maybe");
-      setResult({ message: `✓ ${res.deleted} imported transactions cleared from this account` });
+      const res = await importApi.clear(target, "maybe");
+      setResult({ message: `✓ ${res.deleted} imported transactions cleared` });
     } catch (e) {
       setResult({ error: true, message: e.response?.data?.error || e.message });
     } finally {
@@ -353,41 +386,119 @@ function StepMaybeTransactions({ onBack }) {
     }
   };
 
+  const accountPicker = (value, onChange, placeholder) => (
+    <select
+      className="glass-input"
+      style={{ padding: "7px 10px", fontSize: 13, minWidth: 190 }}
+      value={value || ""}
+      onChange={(e) => onChange(e.target.value)}
+    >
+      <option value="">{placeholder}</option>
+      {accounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+    </select>
+  );
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
       <div>
         <div style={{ fontWeight: 700, fontSize: 17, marginBottom: 6 }}>Import transactions.csv</div>
         <div style={{ fontSize: 14, color: "rgba(255,255,255,0.5)", lineHeight: 1.7 }}>
-          Upload the <code>transactions.csv</code> from your Maybe Finance export ZIP. Select which account to assign the transactions to.
+          Upload the <code>transactions.csv</code> from your Maybe Finance export. The file covers
+          all your accounts at once, so each one is matched to a FinTrack account below.
         </div>
       </div>
 
-      <div>
-        <div style={{ fontSize: 13, color: "rgba(255,255,255,0.5)", marginBottom: 6 }}>Target Account</div>
-        <select className="glass-input" style={{ padding: "10px 14px", width: "100%" }} value={accountId} onChange={(e) => setAccountId(e.target.value)}>
-          {accounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
-        </select>
-      </div>
+      <FileDropzone fileRef={fileRef} file={file} onFile={handleFile} label="Drop transactions.csv here" />
 
-      <FileDropzone fileRef={fileRef} file={file} onFile={setFile} label="Drop transactions.csv here" />
+      {inspecting && <div style={{ fontSize: 13, color: "rgba(255,255,255,0.4)" }}>Reading file…</div>}
+
+      {preview && (
+        <div style={{
+          borderRadius: 12, padding: "14px 18px",
+          background: "rgba(99,102,241,0.08)", border: "1px solid rgba(129,140,248,0.25)",
+        }}>
+          <div style={{ fontWeight: 600, color: "#c7d2fe", marginBottom: 2 }}>
+            {preview.total} transactions across {named.length} account{named.length !== 1 ? "s" : ""}
+          </div>
+          <div style={{ fontSize: 13, color: "rgba(255,255,255,0.5)", marginBottom: 12, lineHeight: 1.6 }}>
+            Accounts matched by name are filled in already. Leave one blank to skip those rows.
+          </div>
+
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {named.map((g) => (
+              <div key={g.name} style={{
+                display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12,
+                padding: "8px 12px", borderRadius: 9, background: "rgba(255,255,255,0.04)", fontSize: 13,
+              }}>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{g.name}</div>
+                  <div style={{ color: "rgba(255,255,255,0.4)" }}>
+                    {g.count} transaction{g.count !== 1 ? "s" : ""}
+                    {g.matchedAccount && <span style={{ color: "#6ee7b7" }}> · matched by name</span>}
+                  </div>
+                </div>
+                {accountPicker(
+                  mapping[g.name],
+                  (v) => setMapping((m) => ({ ...m, [g.name]: v })),
+                  "Skip these"
+                )}
+              </div>
+            ))}
+
+            {unnamed && (
+              <div style={{
+                display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12,
+                padding: "8px 12px", borderRadius: 9, background: "rgba(255,255,255,0.04)", fontSize: 13,
+              }}>
+                <div>
+                  <div style={{ fontWeight: 600 }}>No account named</div>
+                  <div style={{ color: "rgba(255,255,255,0.4)" }}>{unnamed.count} transaction{unnamed.count !== 1 ? "s" : ""}</div>
+                </div>
+                {accountPicker(
+                  mapping.__fallback__,
+                  (v) => setMapping((m) => ({ ...m, __fallback__: v })),
+                  "Skip these"
+                )}
+              </div>
+            )}
+          </div>
+
+          {unmapped.length > 0 && (
+            <div style={{ marginTop: 10, fontSize: 13, color: "#fbbf24" }}>
+              {unmapped.length} account{unmapped.length !== 1 ? "s" : ""} not mapped — those transactions will be skipped.
+            </div>
+          )}
+        </div>
+      )}
+
       <ResultBanner result={result} onDismiss={() => setResult(null)} />
+
+      {result?.perAccount?.length > 0 && (
+        <div style={{ fontSize: 13, color: "rgba(255,255,255,0.5)", display: "flex", flexDirection: "column", gap: 4 }}>
+          {result.perAccount.map((p) => (
+            <div key={p.name || "unnamed"}>
+              {p.name || "unnamed"}: {p.imported} imported{p.skipped ? `, ${p.skipped} skipped` : ""}
+            </div>
+          ))}
+        </div>
+      )}
 
       <div style={{ display: "flex", gap: 10 }}>
         <button className="glass-btn" style={{ padding: "11px 20px" }} onClick={onBack}>← Back</button>
         <button
           className="glass-btn glass-btn-primary"
-          style={{ flex: 1, padding: "11px 20px", opacity: (!file || !accountId || loading) ? 0.5 : 1 }}
+          style={{ flex: 1, padding: "11px 20px", opacity: (!file || loading || inspecting) ? 0.5 : 1 }}
           onClick={handleImport}
-          disabled={!file || !accountId || loading}
+          disabled={!file || loading || inspecting}
         >
           {loading ? "Importing…" : "Import Transactions"}
         </button>
         <button
           className="glass-btn"
-          style={{ padding: "11px 20px", opacity: (!accountId || clearing) ? 0.5 : 1, color: "#f87171", borderColor: "rgba(248,113,113,0.25)" }}
+          style={{ padding: "11px 20px", opacity: clearing ? 0.5 : 1, color: "#f87171", borderColor: "rgba(248,113,113,0.25)" }}
           onClick={handleClear}
-          disabled={!accountId || clearing}
-          title="Remove all previously imported Maybe Finance transactions for this account"
+          disabled={clearing}
+          title="Remove previously imported Maybe Finance transactions"
         >
           {clearing ? "Clearing…" : "Clear"}
         </button>

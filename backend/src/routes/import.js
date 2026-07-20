@@ -98,14 +98,129 @@ router.post("/maybe-accounts", upload.single("file"), async (req, res) => {
   res.json({ accounts: results });
 });
 
-router.post("/maybe", upload.single("file"), async (req, res) => {
-  const { accountId } = req.body;
-  if (!accountId) return res.status(400).json({ error: "accountId required" });
+function readCsvRows(filePath) {
+  const content = fs.readFileSync(filePath, "utf8");
+  return new Promise((resolve, reject) => {
+    parse(content, { columns: true, skip_empty_lines: true, trim: true }, (err, records) =>
+      err ? reject(err) : resolve(records)
+    );
+  });
+}
+
+function parseAll(rows, rowParser) {
+  const parsed = [];
+  const errors = [];
+  let skipped = 0;
+  for (const row of rows) {
+    try {
+      const p = rowParser(row);
+      if (isNaN(p.amount) || isNaN(p.date.getTime())) { skipped++; continue; }
+      parsed.push(p);
+    } catch (err) {
+      errors.push(err.message);
+      skipped++;
+    }
+  }
+  return { parsed, skipped, errors };
+}
+
+const nameKey = (value) => String(value || "").trim().toLowerCase();
+
+// A Maybe export holds every account in one file, so rows are grouped by their
+// own "account" column instead of all landing in one account.
+function groupByAccountName(parsedRows) {
+  const groups = new Map();
+  for (const row of parsedRows) {
+    const key = nameKey(row.accountName);
+    const group = groups.get(key) || { name: row.accountName || null, rows: [] };
+    group.rows.push(row);
+    groups.set(key, group);
+  }
+  return groups;
+}
+
+// GET what is in the file and how each account name lines up with FinTrack,
+// so the mapping can be confirmed before anything is written.
+router.post("/maybe/inspect", upload.single("file"), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: "CSV file required" });
 
-  const results = await importCsv(req.file.path, accountId, parseMaybeRow, "maybe");
-  fs.unlinkSync(req.file.path);
-  res.json(results);
+  let rows;
+  try {
+    rows = await readCsvRows(req.file.path);
+  } catch (err) {
+    return res.status(400).json({ error: `Could not read the CSV: ${err.message}` });
+  } finally {
+    try { fs.unlinkSync(req.file.path); } catch {}
+  }
+
+  const { parsed, skipped } = parseAll(rows, parseMaybeRow);
+  const accounts = await prisma.account.findMany({ select: { id: true, name: true } });
+  const byName = new Map(accounts.map((a) => [nameKey(a.name), a]));
+
+  const groups = [...groupByAccountName(parsed).values()].map((g) => ({
+    name: g.name,
+    count: g.rows.length,
+    matchedAccount: g.name ? byName.get(nameKey(g.name)) || null : null,
+  }));
+  groups.sort((a, b) => b.count - a.count);
+
+  res.json({
+    total: parsed.length,
+    skipped,
+    hasAccountColumn: groups.some((g) => g.name),
+    groups,
+  });
+});
+
+router.post("/maybe", upload.single("file"), async (req, res) => {
+  const { accountId } = req.body;
+  if (!req.file) return res.status(400).json({ error: "CSV file required" });
+
+  // { "<name in the CSV>": "<FinTrack account id>" }. Anything unmapped falls
+  // back to accountId, which keeps single-account exports working as before.
+  let accountMap = {};
+  if (req.body.accountMap) {
+    try {
+      accountMap = JSON.parse(req.body.accountMap);
+    } catch {
+      return res.status(400).json({ error: "accountMap is not valid JSON" });
+    }
+  }
+  if (!accountId && Object.keys(accountMap).length === 0) {
+    return res.status(400).json({ error: "accountId or accountMap required" });
+  }
+
+  let rows;
+  try {
+    rows = await readCsvRows(req.file.path);
+  } catch (err) {
+    return res.status(400).json({ error: `Could not read the CSV: ${err.message}` });
+  } finally {
+    try { fs.unlinkSync(req.file.path); } catch {}
+  }
+
+  const { parsed, skipped: parseSkipped, errors } = parseAll(rows, parseMaybeRow);
+  const mapByKey = new Map(Object.entries(accountMap).map(([k, v]) => [nameKey(k), v]));
+
+  const totals = { imported: 0, skipped: parseSkipped, errors: [...errors] };
+  const perAccount = [];
+
+  for (const group of groupByAccountName(parsed).values()) {
+    const target = mapByKey.get(nameKey(group.name)) || accountId;
+    if (!target) {
+      // Nowhere to put these: report instead of silently dropping them
+      totals.skipped += group.rows.length;
+      totals.errors.push(`No account selected for "${group.name}" — ${group.rows.length} rows skipped`);
+      continue;
+    }
+    const result = await persistRows(group.rows, target, "maybe");
+    totals.imported += result.imported;
+    totals.skipped += result.skipped;
+    totals.errors.push(...result.errors);
+    perAccount.push({ name: group.name, accountId: target, ...result });
+  }
+
+  res.json({ ...totals, errors: totals.errors.slice(0, 10), perAccount });
 });
 
 router.post("/generic", upload.single("file"), async (req, res) => {

@@ -65,11 +65,17 @@ export const stats = {
 };
 
 export const importApi = {
-  maybe: (accountId, file) => {
+  maybe: (accountId, file, accountMap) => {
     const form = new FormData();
-    form.append("accountId", accountId);
+    if (accountId) form.append("accountId", accountId);
+    if (accountMap) form.append("accountMap", JSON.stringify(accountMap));
     form.append("file", file);
     return api.post("/import/maybe", form).then((r) => r.data);
+  },
+  maybeInspect: (file) => {
+    const form = new FormData();
+    form.append("file", file);
+    return api.post("/import/maybe/inspect", form).then((r) => r.data);
   },
   generic: (accountId, file) => {
     const form = new FormData();

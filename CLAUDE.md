@@ -88,7 +88,7 @@ To actually get Watchtower auto-updates, images must be published (GitHub Action
 
 `backend/package.json` `version` is the **single source of truth** — bump it on
 every meaningful change (keep `frontend/package.json` in sync for tidiness).
-Currently **1.8.0**.
+Currently **1.9.0**.
 
 - `GET /version` → `{ version, buildTime }` (authenticated)
 - `GET /version/check` → compares against the `version` in `backend/package.json`
@@ -129,6 +129,20 @@ step 2. Changing the secret invalidates existing sessions.
   SQLite commit each made imports exceed nginx's 60s timeout. Now: categories
   resolved via one map, existing `externalId`s fetched in one query, inserts
   batched 200-per-transaction. nginx proxy timeouts raised to 300s.
+
+## Maybe Finance import (multi-account)
+
+A Maybe export puts **every account in one transactions.csv**, identified by an
+ column. That column was parsed into  but never used, so a
+single target account was applied to every row and transactions landed on the
+wrong accounts.
+
+-  returns the account names in the file with row
+  counts and the FinTrack account each matches by name.
+-  takes  ({ csv name -> account id }); rows are
+  grouped by account name and persisted per group.  remains the
+  fallback for rows with no account name, so single-account files still work.
+- An unmapped group is **skipped and reported**, never silently redirected.
 
 ## Investments (holdings)
 
