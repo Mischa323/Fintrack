@@ -4,6 +4,7 @@ const { parse } = require("csv-parse");
 const { PrismaClient } = require("@prisma/client");
 const fs = require("fs");
 const path = require("path");
+const crypto = require("crypto");
 const { parseCamt053 } = require("../services/camt053");
 const { persistRows } = require("../services/importTransactions");
 const { normaliseIban } = require("../services/iban");
@@ -17,22 +18,57 @@ const prisma = new PrismaClient();
 
 const upload = multer({ dest: path.join(__dirname, "../../uploads") });
 
-// Parse Maybe Finance CSV export format
-function parseMaybeRow(row) {
-  // Maybe Finance exports: date, name, amount, currency, category, account, notes, id
-  const amount = Math.abs(parseFloat(row.amount || row.Amount || 0));
-  const rawAmount = parseFloat(row.amount || row.Amount || 0);
-  const type = rawAmount >= 0 ? "INCOME" : "EXPENSE";
+// Parse Maybe Finance CSV export format.
+// Columns vary between exports: account/account_name, and an id column that is
+// often absent entirely, so every field is looked up under several names.
+function maybeField(row, ...names) {
+  for (const name of names) {
+    const value = row[name];
+    if (value !== undefined && String(value).trim() !== "") return value;
+  }
+  return null;
+}
+
+function parseMaybeRow(row, fallbackCounter) {
+  const rawAmount = parseFloat(maybeField(row, "amount", "Amount") || 0);
+
+  // Maybe records money leaving the account as POSITIVE and money arriving as
+  // negative — the opposite of what you would expect. Getting this backwards
+  // turns every salary into an expense.
+  const type = rawAmount > 0 ? "EXPENSE" : "INCOME";
+  const amount = Math.abs(rawAmount);
+
+  const date = new Date(maybeField(row, "date", "Date") || "");
+  const description =
+    maybeField(row, "name", "Name", "description", "Description") || "Imported";
+  const accountName = maybeField(row, "account_name", "account", "Account", "accountName");
+
+  let externalId = maybeField(row, "id", "Id", "ID");
+  if (!externalId && fallbackCounter && !isNaN(date.getTime())) {
+    // Without an id column, re-importing the same export would duplicate
+    // everything. Derive a stable id from the row's own content, with an
+    // occurrence counter so genuinely identical rows stay distinct.
+    const basis = [
+      date.toISOString().slice(0, 10),
+      amount.toFixed(2),
+      type,
+      accountName || "",
+      description,
+    ].join("|");
+    const seen = (fallbackCounter.get(basis) || 0) + 1;
+    fallbackCounter.set(basis, seen);
+    externalId = `maybe-${crypto.createHash("sha1").update(`${basis}|${seen}`).digest("hex").slice(0, 24)}`;
+  }
 
   return {
-    date: new Date(row.date || row.Date),
-    description: row.name || row.Name || row.description || row.Description || "Imported",
+    date,
+    description,
     amount,
     type,
-    categoryName: row.category || row.Category || null,
-    accountName: row.account || row.Account || null,
-    notes: row.notes || row.Notes || null,
-    externalId: row.id || row.Id || null,
+    categoryName: maybeField(row, "category", "Category"),
+    accountName,
+    notes: maybeField(row, "notes", "Notes"),
+    externalId: externalId || null,
   };
 }
 
@@ -110,10 +146,11 @@ function readCsvRows(filePath) {
 function parseAll(rows, rowParser) {
   const parsed = [];
   const errors = [];
+  const fallbackCounter = new Map();
   let skipped = 0;
   for (const row of rows) {
     try {
-      const p = rowParser(row);
+      const p = rowParser(row, fallbackCounter);
       if (isNaN(p.amount) || isNaN(p.date.getTime())) { skipped++; continue; }
       parsed.push(p);
     } catch (err) {
@@ -137,6 +174,71 @@ function groupByAccountName(parsedRows) {
     groups.set(key, group);
   }
   return groups;
+}
+
+// Maybe writes both sides of an internal transfer as separate rows, named
+// "Transfer to <account>" / "Transfer from <account>". Left alone they import as
+// an expense AND an income, inflating both totals. Here the two legs are matched
+// on the account names in their descriptions and merged into one TRANSFER row.
+const TRANSFER_RE = /^\s*transfer\s+(to|from)\s+(.+?)\s*$/i;
+
+function linkMaybeTransfers(parsedRows, accountIdByName) {
+  const resolve = (name) => accountIdByName.get(nameKey(name)) || null;
+
+  const legs = [];
+  const plain = [];
+  for (const row of parsedRows) {
+    const match = TRANSFER_RE.exec(row.description || "");
+    const ownAccount = resolve(row.accountName);
+    const otherAccount = match ? resolve(match[2]) : null;
+    if (!match || !ownAccount || !otherAccount || ownAccount === otherAccount) {
+      plain.push(row);
+      continue;
+    }
+    legs.push({
+      row,
+      outgoing: match[1].toLowerCase() === "to",
+      fromId: match[1].toLowerCase() === "to" ? ownAccount : otherAccount,
+      toId: match[1].toLowerCase() === "to" ? otherAccount : ownAccount,
+    });
+  }
+
+  const used = new Set();
+  const transfers = [];
+  let paired = 0;
+
+  for (const leg of legs) {
+    if (used.has(leg)) continue;
+    // The opposite leg names the same two accounts, same amount, same day
+    const mirror = legs.find(
+      (other) =>
+        other !== leg && !used.has(other) &&
+        other.outgoing !== leg.outgoing &&
+        other.fromId === leg.fromId && other.toId === leg.toId &&
+        Math.abs(other.row.amount - leg.row.amount) < 0.005 &&
+        Math.abs(other.row.date - leg.row.date) <= 4 * 86400000
+    );
+    used.add(leg);
+    if (mirror) { used.add(mirror); paired++; }
+
+    const canonical = leg.outgoing ? leg : mirror || leg;
+    // Both legs derive the same id, so re-importing skips instead of duplicating
+    const basis = [
+      canonical.row.date.toISOString().slice(0, 10),
+      canonical.row.amount.toFixed(2),
+      leg.fromId,
+      leg.toId,
+    ].join("|");
+    transfers.push({
+      ...canonical.row,
+      type: "TRANSFER",
+      transferFromAccountId: leg.fromId,
+      transferToAccountId: leg.toId,
+      externalId: `maybe-tr-${crypto.createHash("sha1").update(basis).digest("hex").slice(0, 24)}`,
+    });
+  }
+
+  return { rows: [...plain, ...transfers], transfers: transfers.length, paired };
 }
 
 // GET what is in the file and how each account name lines up with FinTrack,
@@ -202,10 +304,26 @@ router.post("/maybe", upload.single("file"), async (req, res) => {
   const { parsed, skipped: parseSkipped, errors } = parseAll(rows, parseMaybeRow);
   const mapByKey = new Map(Object.entries(accountMap).map(([k, v]) => [nameKey(k), v]));
 
-  const totals = { imported: 0, skipped: parseSkipped, errors: [...errors] };
+  // Merge both legs of each internal transfer before anything is written
+  const linked = linkMaybeTransfers(parsed, mapByKey);
+
+  const totals = {
+    imported: 0,
+    skipped: parseSkipped,
+    errors: [...errors],
+    transfers: linked.transfers,
+    transfersPaired: linked.paired,
+  };
   const perAccount = [];
 
-  for (const group of groupByAccountName(parsed).values()) {
+  // A transfer belongs to the account it leaves, whatever row it came from
+  const idToName = new Map();
+  for (const [key, id] of mapByKey) idToName.set(id, key);
+  for (const row of linked.rows) {
+    if (row.type === "TRANSFER") row.accountName = idToName.get(row.transferFromAccountId) || row.accountName;
+  }
+
+  for (const group of groupByAccountName(linked.rows).values()) {
     const target = mapByKey.get(nameKey(group.name)) || accountId;
     if (!target) {
       // Nowhere to put these: report instead of silently dropping them
