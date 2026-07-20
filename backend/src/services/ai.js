@@ -11,6 +11,18 @@ const DEFAULT_URL = "http://host.docker.internal:11434";
 const BATCH_SIZE = 20;
 const REQUEST_TIMEOUT_MS = 120000;
 
+// Addresses get pasted with stray whitespace, a trailing slash, or https on a
+// server that only speaks plain HTTP. Normalise rather than fail on it.
+function normaliseUrl(value) {
+  let url = String(value || "").trim().replace(/\s+/g, "");
+  if (!url) return DEFAULT_URL;
+  if (!/^https?:\/\//i.test(url)) url = `http://${url}`;
+  // Ollama serves plain HTTP; https here is almost always a typo that would
+  // otherwise fail with a confusing TLS error.
+  url = url.replace(/^https:\/\//i, "http://");
+  return url.replace(/\/+$/, "");
+}
+
 async function getConfig() {
   const settings = await prisma.settings.upsert({
     where: { id: "singleton" },
@@ -18,7 +30,7 @@ async function getConfig() {
     create: { id: "singleton" },
   });
   return {
-    url: (settings.aiUrl || DEFAULT_URL).replace(/\/+$/, ""),
+    url: normaliseUrl(settings.aiUrl),
     model: settings.aiModel || null,
   };
 }
