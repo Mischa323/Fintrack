@@ -133,14 +133,14 @@ step 2. Changing the secret invalidates existing sessions.
 ## Maybe Finance import (multi-account)
 
 A Maybe export puts **every account in one transactions.csv**, identified by an
- column. That column was parsed into  but never used, so a
-single target account was applied to every row and transactions landed on the
-wrong accounts.
+`account` column. That column was parsed into `accountName` but never used, so
+the single target account chosen in the wizard was applied to every row and
+transactions from all accounts landed on one.
 
--  returns the account names in the file with row
+- `POST /import/maybe/inspect` returns the account names in the file with row
   counts and the FinTrack account each matches by name.
--  takes  ({ csv name -> account id }); rows are
-  grouped by account name and persisted per group.  remains the
+- `POST /import/maybe` takes `accountMap` (`{ csv name: account id }`); rows are
+  grouped by account name and persisted per group. `accountId` remains the
   fallback for rows with no account name, so single-account files still work.
 - An unmapped group is **skipped and reported**, never silently redirected.
 
