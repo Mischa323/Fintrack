@@ -345,6 +345,7 @@ export default function Transactions() {
           </select>
           <select className="glass-input" style={{ padding: "8px 12px" }} value={filters.categoryId} onChange={(e) => setFilters({ ...filters, categoryId: e.target.value, page: 1 })}>
             <option value="">All categories</option>
+            <option value="none">Uncategorized</option>
             {allCategories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
           </select>
         </div>

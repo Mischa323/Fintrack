@@ -16,7 +16,10 @@ router.get("/", async (req, res) => {
 
   const where = {};
   if (accountId) where.OR = [{ accountId }, { toAccountId: accountId }];
-  if (categoryId) where.categoryId = categoryId;
+  // "none" filters the transactions with no category, so they can be found and
+  // fixed after an import.
+  if (categoryId === "none") where.categoryId = null;
+  else if (categoryId) where.categoryId = categoryId;
   if (type) where.type = type;
   if (from || to) {
     where.date = {};
