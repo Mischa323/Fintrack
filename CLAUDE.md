@@ -147,7 +147,7 @@ transactions from all accounts landed on one.
 ## Category colours (also the spending-chart palette)
 
 Category colours double as the dashboard pie slices, so they must stay distinct
-on the dark chart surface. The first eight ( `COLORS`) were
+on the dark chart surface. The first eight (`Categories.jsx` `COLORS`) were
 validated with the dataviz skill: worst adjacent CVD ΔE 8.4, normal-vision 19.3.
 The previous set failed hard — indigo vs violet measured ΔE 0.8 (colourblind) /
 6.3 (normal), effectively identical. Past eight hues no ordering clears the
