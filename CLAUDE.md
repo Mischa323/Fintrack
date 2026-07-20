@@ -88,7 +88,7 @@ To actually get Watchtower auto-updates, images must be published (GitHub Action
 
 `backend/package.json` `version` is the **single source of truth** — bump it on
 every meaningful change (keep `frontend/package.json` in sync for tidiness).
-Currently **1.15.1**.
+Currently **1.16.0**.
 
 - `GET /version` → `{ version, buildTime }` (authenticated)
 - `GET /version/check` → compares against the `version` in `backend/package.json`
@@ -211,6 +211,17 @@ that actually changes daily.
   buys and sells netted per ticker, average cost weighted across buys, and a
   fully sold ticker is dropped. Dividends, fees and top-ups are ignored.
   Column matching is fuzzy since the export format varies.
+
+## Holding trades (buy/sell history)
+
+A `Trade` (BUY/SELL, quantity, price, date) records changes to a holding. The
+holding quantity and avgCost are **derived by replaying its trades** in order, so
+deleting a mistaken entry recomputes cleanly. Selling leaves avg cost per share
+unchanged; buying weights it. A position added or imported before any trades gets
+a one-off `opening` trade seeded from its current quantity/avgCost the first time
+a trade is recorded, so the ledger stays complete. The opening trade always
+replays first regardless of later trade dates. `GET/POST /holdings/:id/trades`,
+`DELETE /holdings/:id/trades/:tradeId`.
 
 ## Bulk transaction actions
 

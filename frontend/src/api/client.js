@@ -121,6 +121,9 @@ export const holdings = {
     form.append("file", file);
     return api.post("/holdings/import/trades", form).then((r) => r.data);
   },
+  trades: (holdingId) => api.get(`/holdings/${holdingId}/trades`).then((r) => r.data),
+  addTrade: (holdingId, data) => api.post(`/holdings/${holdingId}/trades`, data).then((r) => r.data),
+  removeTrade: (holdingId, tradeId) => api.delete(`/holdings/${holdingId}/trades/${tradeId}`),
   importRevolut: (accountId, file) => {
     const form = new FormData();
     form.append("accountId", accountId);

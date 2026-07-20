@@ -19,6 +19,165 @@ const emptyForm = { name: "", type: "CHECKING", currency: "EUR", balance: "", co
 const fieldStyle = { padding: "10px 14px", width: "100%", boxSizing: "border-box", display: "block", marginTop: 6 };
 const labelStyle = { fontSize: 12, color: "rgba(255,255,255,0.5)", fontWeight: 500, display: "block" };
 
+// ── Buy / sell history for one holding ───────────────────────────────────────
+function HoldingTradesModal({ holding, onClose, onChanged }) {
+  const [trades, setTrades] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+  const [form, setForm] = useState({
+    kind: "BUY",
+    quantity: "",
+    price: "",
+    date: new Date().toISOString().slice(0, 10),
+  });
+
+  const money = (n, cur) =>
+    new Intl.NumberFormat("nl-NL", { style: "currency", currency: cur || "EUR" }).format(n);
+
+  const load = () =>
+    holdingsApi.trades(holding.id).then((t) => { setTrades(t); setLoading(false); });
+  useEffect(() => { load(); }, [holding.id]);
+
+  const add = async (e) => {
+    e.preventDefault();
+    if (!form.quantity || Number(form.quantity) <= 0) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await holdingsApi.addTrade(holding.id, {
+        kind: form.kind,
+        quantity: Number(form.quantity),
+        price: form.price === "" ? undefined : Number(form.price),
+        date: form.date,
+      });
+      setForm((f) => ({ ...f, quantity: "", price: "" }));
+      await load();
+      onChanged?.();
+    } catch (err) {
+      setError(err.response?.data?.error || err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const remove = async (t) => {
+    if (t.opening) {
+      alert("The opening position can't be removed on its own — delete the holding to start over.");
+      return;
+    }
+    if (!confirm(`Remove this ${t.kind.toLowerCase()} of ${Number(t.quantity)} ${holding.symbol}?`)) return;
+    await holdingsApi.removeTrade(holding.id, t.id);
+    await load();
+    onChanged?.();
+  };
+
+  return (
+    <div className="modal-overlay" onClick={(e) => e.target === e.currentTarget && onClose()}>
+      <div className="glass-strong" style={{ width: 560, maxWidth: "95vw", maxHeight: "90vh", padding: 28, display: "flex", flexDirection: "column" }}>
+        <div>
+          <h2 style={{ margin: 0, fontSize: 18 }}>{holding.symbol} — buys & sells</h2>
+          <p style={{ margin: "4px 0 0", fontSize: 13, color: "rgba(255,255,255,0.45)" }}>
+            {Number(holding.quantity)} held
+            {holding.avgCost != null && ` · avg cost ${money(Number(holding.avgCost), holding.currency)}`}
+          </p>
+        </div>
+
+        {/* Record a trade */}
+        <form onSubmit={add} style={{ display: "flex", gap: 8, marginTop: 18, flexWrap: "wrap", alignItems: "flex-end" }}>
+          <div style={{ display: "flex", borderRadius: 9, overflow: "hidden", border: "1px solid rgba(255,255,255,0.12)" }}>
+            {["BUY", "SELL"].map((k) => (
+              <button
+                key={k}
+                type="button"
+                onClick={() => setForm((f) => ({ ...f, kind: k }))}
+                style={{
+                  padding: "9px 14px", fontSize: 13, fontWeight: 600, border: "none", cursor: "pointer",
+                  background: form.kind === k ? (k === "BUY" ? "rgba(52,211,153,0.25)" : "rgba(248,113,113,0.25)") : "transparent",
+                  color: form.kind === k ? (k === "BUY" ? "#6ee7b7" : "#fca5a5") : "rgba(255,255,255,0.5)",
+                }}
+              >
+                {k === "BUY" ? "Buy" : "Sell"}
+              </button>
+            ))}
+          </div>
+          <label style={{ flex: "0 1 90px", fontSize: 12, color: "rgba(255,255,255,0.5)" }}>
+            Quantity
+            <input className="glass-input" type="number" step="any" style={{ padding: "9px 11px", width: "100%", marginTop: 4 }}
+              value={form.quantity} onChange={(e) => setForm((f) => ({ ...f, quantity: e.target.value }))} />
+          </label>
+          <label style={{ flex: "0 1 110px", fontSize: 12, color: "rgba(255,255,255,0.5)" }}>
+            Price / share
+            <input className="glass-input" type="number" step="any" style={{ padding: "9px 11px", width: "100%", marginTop: 4 }}
+              placeholder="optional" value={form.price} onChange={(e) => setForm((f) => ({ ...f, price: e.target.value }))} />
+          </label>
+          <label style={{ flex: "0 1 130px", fontSize: 12, color: "rgba(255,255,255,0.5)" }}>
+            Date
+            <input className="glass-input" type="date" style={{ padding: "9px 11px", width: "100%", marginTop: 4 }}
+              value={form.date} onChange={(e) => setForm((f) => ({ ...f, date: e.target.value }))} />
+          </label>
+          <button type="submit" className="glass-btn glass-btn-primary" style={{ padding: "9px 16px", opacity: (busy || !form.quantity) ? 0.5 : 1 }} disabled={busy || !form.quantity}>
+            Record
+          </button>
+        </form>
+        {error && <div style={{ marginTop: 10, fontSize: 13, color: "#f87171" }}>{error}</div>}
+
+        {/* History */}
+        <div style={{ flex: 1, overflowY: "auto", marginTop: 18, minHeight: 100 }}>
+          {loading ? (
+            <div style={{ color: "rgba(255,255,255,0.35)", fontSize: 13 }}>Loading…</div>
+          ) : trades.length === 0 ? (
+            <div style={{ color: "rgba(255,255,255,0.3)", fontSize: 13, padding: "24px 0", textAlign: "center" }}>
+              No trades recorded yet. Record a buy or sell above.
+            </div>
+          ) : (
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+              <thead>
+                <tr style={{ borderBottom: "1px solid rgba(255,255,255,0.08)" }}>
+                  {["Date", "", "Qty", "Price", ""].map((h, i) => (
+                    <th key={i} style={{ padding: "8px 10px", textAlign: i >= 2 && i <= 3 ? "right" : "left", color: "rgba(255,255,255,0.4)", fontWeight: 600 }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {trades.map((t) => (
+                  <tr key={t.id} style={{ borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
+                    <td style={{ padding: "9px 10px", color: "rgba(255,255,255,0.6)", whiteSpace: "nowrap" }}>
+                      {new Date(t.date).toLocaleDateString()}
+                    </td>
+                    <td style={{ padding: "9px 10px" }}>
+                      {t.opening ? (
+                        <span style={{ color: "rgba(255,255,255,0.4)" }}>Opening</span>
+                      ) : (
+                        <span style={{ color: t.kind === "BUY" ? "#34d399" : "#f87171", fontWeight: 600 }}>
+                          {t.kind === "BUY" ? "Buy" : "Sell"}
+                        </span>
+                      )}
+                    </td>
+                    <td style={{ padding: "9px 10px", textAlign: "right" }}>{Number(t.quantity)}</td>
+                    <td style={{ padding: "9px 10px", textAlign: "right", color: "rgba(255,255,255,0.6)" }}>
+                      {t.price == null ? "—" : money(Number(t.price), holding.currency)}
+                    </td>
+                    <td style={{ padding: "9px 10px", textAlign: "right" }}>
+                      {!t.opening && (
+                        <button className="glass-btn glass-btn-danger" style={{ padding: "3px 9px", fontSize: 12 }} onClick={() => remove(t)}>×</button>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+
+        <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 16 }}>
+          <button className="glass-btn glass-btn-ghost" style={{ padding: "9px 18px" }} onClick={onClose}>Close</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Investment holdings ──────────────────────────────────────────────────────
 // No broker offers an API for personal accounts, so quantities are entered or
 // imported once. Only the prices refresh automatically.
@@ -30,6 +189,7 @@ function HoldingsModal({ account, onClose, onChanged }) {
   const [form, setForm] = useState({ symbol: "", quantity: "", avgCost: "" });
   const fileRef = useRef();
   const tradesRef = useRef();
+  const [tradesFor, setTradesFor] = useState(null);
 
   const money = (n, cur) =>
     new Intl.NumberFormat("nl-NL", { style: "currency", currency: cur || "EUR" }).format(n);
@@ -184,7 +344,8 @@ function HoldingsModal({ account, onClose, onChanged }) {
                       <td style={{ padding: "9px 10px", textAlign: "right", color: gain == null ? "rgba(255,255,255,0.3)" : gain >= 0 ? "#34d399" : "#f87171" }}>
                         {gain == null ? "—" : `${gain >= 0 ? "+" : ""}${money(gain, h.currency)}${pct != null ? ` (${pct >= 0 ? "+" : ""}${pct.toFixed(1)}%)` : ""}`}
                       </td>
-                      <td style={{ padding: "9px 10px", textAlign: "right" }}>
+                      <td style={{ padding: "9px 10px", textAlign: "right", whiteSpace: "nowrap" }}>
+                        <button className="glass-btn glass-btn-ghost" style={{ padding: "3px 9px", fontSize: 12, marginRight: 5 }} onClick={() => setTradesFor(h)} title="Buy, sell and history">⇄</button>
                         <button className="glass-btn glass-btn-danger" style={{ padding: "3px 9px", fontSize: 12 }} onClick={() => remove(h)}>×</button>
                       </td>
                     </tr>

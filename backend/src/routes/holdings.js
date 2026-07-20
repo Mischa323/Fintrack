@@ -10,6 +10,62 @@ const router = express.Router();
 const prisma = new PrismaClient();
 const upload = multer({ dest: path.join(__dirname, "../../uploads") });
 
+// Derive a holding's quantity and average cost by replaying its trades in date
+// order, so removing a mistaken trade recomputes the position cleanly. A holding
+// with no trades keeps whatever quantity it was created or imported with.
+async function recomputeFromTrades(holdingId) {
+  const trades = await prisma.trade.findMany({
+    where: { holdingId },
+    // The opening trade is the baseline the recorded trades build on, so it is
+    // always replayed first regardless of the dates entered for later trades.
+    orderBy: [{ opening: "desc" }, { date: "asc" }, { createdAt: "asc" }],
+  });
+  if (trades.length === 0) return;
+
+  let quantity = 0;
+  let cost = 0; // running total cost of the shares still held
+  for (const t of trades) {
+    const q = Number(t.quantity);
+    const price = t.price == null ? null : Number(t.price);
+    if (t.kind === "SELL") {
+      const avg = quantity > 0 ? cost / quantity : 0;
+      quantity -= q;
+      cost = Math.max(0, cost - q * avg); // selling leaves avg cost per share unchanged
+    } else {
+      quantity += q;
+      if (price != null) cost += q * price;
+    }
+  }
+  quantity = Math.round(quantity * 1e8) / 1e8;
+
+  await prisma.holding.update({
+    where: { id: holdingId },
+    data: {
+      quantity: Math.max(0, quantity),
+      avgCost: quantity > 0 && cost > 0 ? cost / quantity : null,
+    },
+  });
+}
+
+// A position added or imported before any trades were recorded has no history.
+// The first time a trade is added to it, capture the current position as an
+// "opening" trade so the ledger stays complete and the replay math is correct.
+async function ensureOpeningTrade(holding) {
+  const count = await prisma.trade.count({ where: { holdingId: holding.id } });
+  if (count > 0) return;
+  if (Number(holding.quantity) <= 0) return;
+  await prisma.trade.create({
+    data: {
+      holdingId: holding.id,
+      date: holding.createdAt,
+      kind: "BUY",
+      quantity: Number(holding.quantity),
+      price: holding.avgCost == null ? null : Number(holding.avgCost),
+      opening: true,
+    },
+  });
+}
+
 // GET /holdings?accountId=
 router.get("/", async (req, res) => {
   const { accountId } = req.query;
@@ -94,6 +150,57 @@ router.put("/:id", async (req, res) => {
 
 router.delete("/:id", async (req, res) => {
   const holding = await prisma.holding.delete({ where: { id: req.params.id } });
+  await recalculateAccountValue(holding.accountId);
+  res.status(204).end();
+});
+
+// GET /holdings/:id/trades — the buy/sell history of one position
+router.get("/:id/trades", async (req, res) => {
+  const trades = await prisma.trade.findMany({
+    where: { holdingId: req.params.id },
+    // Newest first, with the opening baseline kept at the bottom
+    orderBy: [{ opening: "asc" }, { date: "desc" }, { createdAt: "desc" }],
+  });
+  res.json(trades);
+});
+
+// POST /holdings/:id/trades — record a buy or sell
+router.post("/:id/trades", async (req, res) => {
+  const { kind, quantity, price, date } = req.body;
+  if (!["BUY", "SELL"].includes(kind)) {
+    return res.status(400).json({ error: "kind must be BUY or SELL" });
+  }
+  if (quantity === undefined || Number(quantity) <= 0) {
+    return res.status(400).json({ error: "Enter a quantity greater than zero" });
+  }
+
+  const holding = await prisma.holding.findUnique({ where: { id: req.params.id } });
+  if (!holding) return res.status(404).json({ error: "Holding not found" });
+
+  await ensureOpeningTrade(holding);
+  await prisma.trade.create({
+    data: {
+      holdingId: holding.id,
+      date: date ? new Date(date) : new Date(),
+      kind,
+      quantity: Number(quantity),
+      price: price === undefined || price === "" ? null : Number(price),
+    },
+  });
+
+  await recomputeFromTrades(holding.id);
+  await recalculateAccountValue(holding.accountId);
+  const updated = await prisma.holding.findUnique({ where: { id: holding.id } });
+  res.status(201).json(updated);
+});
+
+// DELETE /holdings/:id/trades/:tradeId — undo a mistaken entry
+router.delete("/:id/trades/:tradeId", async (req, res) => {
+  const holding = await prisma.holding.findUnique({ where: { id: req.params.id } });
+  if (!holding) return res.status(404).json({ error: "Holding not found" });
+
+  await prisma.trade.deleteMany({ where: { id: req.params.tradeId, holdingId: holding.id } });
+  await recomputeFromTrades(holding.id);
   await recalculateAccountValue(holding.accountId);
   res.status(204).end();
 });
