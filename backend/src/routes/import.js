@@ -539,11 +539,15 @@ router.delete("/clear", async (req, res) => {
   const { accountId, source } = req.query;
   if (!accountId) return res.status(400).json({ error: "accountId required" });
 
+  // Without a source this clears every IMPORTED row — never manual entries.
+  // Prisma reads `undefined` as "no filter", which would have deleted
+  // hand-entered transactions too.
+  //
   // Transfers created from this account's imports are stored on the paying
   // account, so clearing has to remove those too — otherwise a transfer stays
   // behind pointing at an account whose rows are gone.
   const where = {
-    importedFrom: source || undefined,
+    importedFrom: source ? source : { not: null },
     OR: [{ accountId }, { toAccountId: accountId }],
   };
   const affected = await prisma.transaction.findMany({

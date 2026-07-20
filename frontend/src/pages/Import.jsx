@@ -140,6 +140,7 @@ function StepSource({ onChoose }) {
   const [clearing, setClearing] = useState(false);
   const [clearResult, setClearResult] = useState(null);
   const [showClear, setShowClear] = useState(false);
+  const [clearSource, setClearSource] = useState("");
 
   useEffect(() => {
     accountsApi.list().then((a) => { setAccounts(a); if (a[0]) setAccountId(a[0].id); });
@@ -151,7 +152,7 @@ function StepSource({ onChoose }) {
     setClearing(true);
     setClearResult(null);
     try {
-      const res = await importApi.clear(accountId, "maybe");
+      const res = await importApi.clear(accountId, clearSource || undefined);
       setClearResult(`✓ ${res.deleted} imported transactions removed`);
     } catch (e) {
       setClearResult("Error: " + (e.response?.data?.error || e.message));
@@ -218,16 +219,28 @@ function StepSource({ onChoose }) {
         {showClear && (
           <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 10 }}>
             <div style={{ fontSize: 13, color: "rgba(255,255,255,0.4)" }}>
-              Deletes all imported transactions for the selected account. Does not affect manually entered transactions.
+              Deletes imported transactions for the selected account, and recalculates its balance.
+              Manually entered transactions are never touched.
             </div>
-            <div style={{ display: "flex", gap: 10 }}>
+            <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
               <select
                 className="glass-input"
-                style={{ flex: 1, padding: "9px 12px" }}
+                style={{ flex: "1 1 160px", padding: "9px 12px" }}
                 value={accountId}
                 onChange={(e) => setAccountId(e.target.value)}
               >
                 {accounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+              </select>
+              <select
+                className="glass-input"
+                style={{ flex: "0 1 170px", padding: "9px 12px" }}
+                value={clearSource}
+                onChange={(e) => setClearSource(e.target.value)}
+              >
+                <option value="">Every import</option>
+                <option value="maybe">Maybe Finance only</option>
+                <option value="camt053">ABN AMRO only</option>
+                <option value="generic">Generic CSV only</option>
               </select>
               <button
                 className="glass-btn"
