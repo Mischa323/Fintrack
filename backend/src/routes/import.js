@@ -8,7 +8,7 @@ const crypto = require("crypto");
 const { parseCamt053 } = require("../services/camt053");
 const { persistRows } = require("../services/importTransactions");
 const { normaliseIban } = require("../services/iban");
-const { recalculateBalance } = require("../services/accountBalance");
+const { recalculateBalance, reconcileToBalance } = require("../services/accountBalance");
 const {
   MODES, getDefaultMode, applyAutoTransfers, findTransferCandidates, mergeCandidate,
   unlinkedCounterpartyIbans, convertCandidate,
@@ -122,17 +122,25 @@ router.post("/maybe-accounts", upload.single("file"), async (req, res) => {
     const currency = row.currency || row.Currency || "EUR";
     if (!name || isNaN(balance)) continue;
 
-    const existing = await prisma.account.findFirst({ where: { name } });
-    if (existing) {
-      await prisma.account.update({ where: { id: existing.id }, data: { balance, currency } });
-      results.push({ name, balance, action: "updated" });
+    let account = await prisma.account.findFirst({ where: { name } });
+    if (!account) {
+      account = await prisma.account.create({ data: { name, currency, type: "CHECKING" } });
     } else {
-      await prisma.account.create({ data: { name, balance, currency, type: "CHECKING" } });
-      results.push({ name, balance, action: "created" });
+      await prisma.account.update({ where: { id: account.id }, data: { currency } });
     }
+
+    // The exported balance is what the account is actually worth today, so it
+    // anchors the opening balance against whatever movements are already
+    // recorded. Run this AFTER importing transactions, or the movements it has
+    // to account for are not there yet.
+    const { openingBalance } = await reconcileToBalance(account.id, balance);
+    results.push({ name, balance, openingBalance, action: account ? "updated" : "created" });
   }
 
-  res.json({ accounts: results });
+  res.json({
+    accounts: results,
+    note: "Balances are anchored to these figures. Import transactions first so the opening balance accounts for them.",
+  });
 });
 
 function readCsvRows(filePath) {
@@ -339,6 +347,12 @@ router.post("/maybe", upload.single("file"), async (req, res) => {
     perAccount.push({ name: group.name, accountId: target, ...result });
   }
 
+  // Balance follows from openingBalance + recorded movements, so it has to be
+  // re-derived once new movements land.
+  for (const id of new Set(perAccount.map((p) => p.accountId))) {
+    await recalculateBalance(id);
+  }
+
   res.json({ ...totals, errors: totals.errors.slice(0, 10), perAccount });
 });
 
@@ -454,6 +468,8 @@ router.post("/camt", upload.array("files", 400), async (req, res) => {
 
   // In confirm mode, show what could be merged rather than doing it silently.
   const candidates = mode === "confirm" ? await findTransferCandidates() : [];
+
+  await recalculateBalance(accountId);
 
   res.json({
     ...results,

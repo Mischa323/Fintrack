@@ -62,11 +62,30 @@ router.post("/", async (req, res) => {
 });
 
 router.put("/:id", async (req, res) => {
-  const { quantity, avgCost, name } = req.body;
+  const { quantity, avgCost, name, symbol } = req.body;
   const data = {};
   if (quantity !== undefined) data.quantity = Number(quantity);
   if (avgCost !== undefined) data.avgCost = avgCost === "" ? null : Number(avgCost);
   if (name !== undefined) data.name = name || null;
+
+  // Imported tickers do not always match a tradeable symbol (Maybe exports
+  // "REINMETHAL" for Rheinmetall), so the symbol can be corrected and the price
+  // is looked up again straight away.
+  if (symbol) {
+    const ticker = String(symbol).trim().toUpperCase();
+    try {
+      const quote = await fetchQuote(ticker);
+      data.symbol = ticker;
+      data.currency = quote.currency;
+      data.lastPrice = quote.price;
+      data.lastPriceAt = new Date();
+      if (!name) data.name = quote.name;
+    } catch {
+      return res.status(400).json({
+        error: `No price found for "${ticker}". European listings usually need a suffix, e.g. ASML.AS, RHM.DE, MC.PA.`,
+      });
+    }
+  }
 
   const holding = await prisma.holding.update({ where: { id: req.params.id }, data });
   await recalculateAccountValue(holding.accountId);
@@ -215,6 +234,99 @@ router.post("/import/revolut", upload.single("file"), async (req, res) => {
 
   await recalculateAccountValue(accountId);
   res.json({ imported: imported.length, positions: imported, buys, sells, ignored, errors: errors.slice(0, 10) });
+});
+
+// ── Maybe Finance trades.csv ─────────────────────────────────────────────────
+// Columns: date, account_name, ticker, quantity, price, amount, currency.
+// Like the Revolut export it lists trades, so positions are derived by netting
+// per account and ticker. Account names are matched the way the transaction
+// import does, so one file can fill several investment accounts at once.
+router.post("/import/trades", upload.single("file"), async (req, res) => {
+  if (!req.file) return res.status(400).json({ error: "CSV file required" });
+
+  let rows;
+  try {
+    const content = fs.readFileSync(req.file.path, "utf8");
+    rows = await new Promise((resolve, reject) => {
+      parse(content, { columns: true, skip_empty_lines: true, trim: true }, (err, records) =>
+        err ? reject(err) : resolve(records)
+      );
+    });
+  } catch (err) {
+    return res.status(400).json({ error: `Could not read the CSV: ${err.message}` });
+  } finally {
+    try { fs.unlinkSync(req.file.path); } catch {}
+  }
+
+  const accounts = await prisma.account.findMany({ select: { id: true, name: true } });
+  const byName = new Map(accounts.map((a) => [a.name.trim().toLowerCase(), a]));
+
+  // account id -> ticker -> { quantity, cost, currency }
+  const perAccount = new Map();
+  const unknownAccounts = new Set();
+  let ignored = 0;
+
+  for (const row of rows) {
+    const accountName = (pickColumn(row, ["accountname", "account"]) || "").trim();
+    const ticker = (pickColumn(row, ["ticker", "symbol"]) || "").trim().toUpperCase();
+    const quantity = parseNumber(pickColumn(row, ["quantity", "shares"]));
+    const price = parseNumber(pickColumn(row, ["priceper", "price"]));
+    if (!ticker || !Number.isFinite(quantity) || quantity === 0) { ignored++; continue; }
+
+    const account = byName.get(accountName.toLowerCase());
+    if (!account) { unknownAccounts.add(accountName || "(no name)"); ignored++; continue; }
+
+    const currency = String(pickColumn(row, ["currency"]) || "USD").trim().toUpperCase();
+    const tickers = perAccount.get(account.id) || new Map();
+    const entry = tickers.get(ticker) || { quantity: 0, cost: 0, currency };
+    entry.quantity += quantity; // sells appear as negative quantities
+    if (Number.isFinite(price)) entry.cost += quantity * price;
+    tickers.set(ticker, entry);
+    perAccount.set(account.id, tickers);
+  }
+
+  const imported = [];
+  const withoutPrice = [];
+  for (const [accountId, tickers] of perAccount) {
+    for (const [symbol, entry] of tickers) {
+      const quantity = Math.round(entry.quantity * 1e8) / 1e8;
+      if (quantity <= 0) continue;
+      const quote = await fetchQuote(symbol).catch(() => null);
+      await prisma.holding.upsert({
+        where: { accountId_symbol: { accountId, symbol } },
+        update: {
+          quantity,
+          avgCost: entry.cost > 0 ? entry.cost / quantity : null,
+          ...(quote ? { currency: quote.currency, lastPrice: quote.price, lastPriceAt: new Date(), name: quote.name } : {}),
+        },
+        create: {
+          accountId, symbol, quantity,
+          avgCost: entry.cost > 0 ? entry.cost / quantity : null,
+          currency: quote?.currency || entry.currency,
+          name: quote?.name || null,
+          lastPrice: quote?.price ?? null,
+          lastPriceAt: quote ? new Date() : null,
+        },
+      });
+      imported.push({ symbol, quantity, priced: !!quote });
+      if (!quote) withoutPrice.push(symbol);
+    }
+    await recalculateAccountValue(accountId);
+  }
+
+  res.json({
+    imported: imported.length,
+    accounts: perAccount.size,
+    positions: imported,
+    withoutPrice,
+    unknownAccounts: [...unknownAccounts],
+    ignored,
+    // Said plainly: an unpriced position is saved but contributes nothing until
+    // its symbol is corrected to one the quote provider knows.
+    note: withoutPrice.length
+      ? `No price found for ${withoutPrice.join(", ")} — edit the symbol on those positions (e.g. RHM.DE for Rheinmetall, SI=F for silver).`
+      : undefined,
+  });
 });
 
 module.exports = router;

@@ -29,6 +29,7 @@ function HoldingsModal({ account, onClose, onChanged }) {
   const [msg, setMsg] = useState(null);
   const [form, setForm] = useState({ symbol: "", quantity: "", avgCost: "" });
   const fileRef = useRef();
+  const tradesRef = useRef();
 
   const money = (n, cur) =>
     new Intl.NumberFormat("nl-NL", { style: "currency", currency: cur || "EUR" }).format(n);
@@ -85,6 +86,24 @@ function HoldingsModal({ account, onClose, onChanged }) {
       const r = await holdingsApi.importRevolut(account.id, file);
       done(`${r.imported} position${r.imported === 1 ? "" : "s"} imported from ${r.buys} buys and ${r.sells} sells`
         + (r.errors?.length ? ` — ${r.errors[0]}` : ""));
+    } catch (err) {
+      setMsg({ error: true, text: err.response?.data?.error || err.message });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const importTrades = async (file) => {
+    if (!file) return;
+    setBusy(true);
+    setMsg(null);
+    try {
+      const r = await holdingsApi.importTrades(file);
+      done(
+        `${r.imported} position${r.imported === 1 ? "" : "s"} imported across `
+        + `${r.accounts} account${r.accounts === 1 ? "" : "s"}`
+        + (r.note ? ` — ${r.note}` : "")
+      );
     } catch (err) {
       setMsg({ error: true, text: err.response?.data?.error || err.message });
     } finally {
@@ -213,12 +232,16 @@ function HoldingsModal({ account, onClose, onChanged }) {
             Have many positions? Import the Stocks statement from the Revolut app.
           </div>
           <div style={{ display: "flex", gap: 8 }}>
+            <button className="glass-btn glass-btn-ghost" style={{ padding: "8px 16px", fontSize: 13 }} onClick={() => tradesRef.current.click()} disabled={busy}>
+              Import trades.csv
+            </button>
             <button className="glass-btn glass-btn-ghost" style={{ padding: "8px 16px", fontSize: 13 }} onClick={() => fileRef.current.click()} disabled={busy}>
-              Import Revolut CSV
+              Revolut CSV
             </button>
             <button className="glass-btn" style={{ padding: "8px 16px", fontSize: 13 }} onClick={onClose}>Close</button>
           </div>
           <input ref={fileRef} type="file" accept=".csv" style={{ display: "none" }} onChange={(e) => importCsv(e.target.files[0])} />
+          <input ref={tradesRef} type="file" accept=".csv" style={{ display: "none" }} onChange={(e) => importTrades(e.target.files[0])} />
         </div>
       </div>
     </div>

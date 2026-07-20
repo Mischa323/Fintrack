@@ -116,6 +116,11 @@ export const holdings = {
   update: (id, data) => api.put(`/holdings/${id}`, data).then((r) => r.data),
   remove: (id) => api.delete(`/holdings/${id}`),
   refresh: (accountId) => api.post("/holdings/refresh", { accountId }).then((r) => r.data),
+  importTrades: (file) => {
+    const form = new FormData();
+    form.append("file", file);
+    return api.post("/holdings/import/trades", form).then((r) => r.data);
+  },
   importRevolut: (accountId, file) => {
     const form = new FormData();
     form.append("accountId", accountId);
