@@ -8,6 +8,7 @@ const crypto = require("crypto");
 const { parseCamt053 } = require("../services/camt053");
 const { persistRows } = require("../services/importTransactions");
 const { normaliseIban } = require("../services/iban");
+const { recalculateBalance } = require("../services/accountBalance");
 const {
   MODES, getDefaultMode, applyAutoTransfers, findTransferCandidates, mergeCandidate,
   unlinkedCounterpartyIbans, convertCandidate,
@@ -538,18 +539,32 @@ router.delete("/clear", async (req, res) => {
   const { accountId, source } = req.query;
   if (!accountId) return res.status(400).json({ error: "accountId required" });
 
-  const where = { accountId, importedFrom: source || undefined };
+  // Transfers created from this account's imports are stored on the paying
+  // account, so clearing has to remove those too — otherwise a transfer stays
+  // behind pointing at an account whose rows are gone.
+  const where = {
+    importedFrom: source || undefined,
+    OR: [{ accountId }, { toAccountId: accountId }],
+  };
+  const affected = await prisma.transaction.findMany({
+    where,
+    select: { accountId: true, toAccountId: true },
+  });
   const deleted = await prisma.transaction.deleteMany({ where });
 
-  // Recalculate balance from remaining transactions
-  const [income, expense] = await Promise.all([
-    prisma.transaction.aggregate({ _sum: { amount: true }, where: { accountId, type: "INCOME" } }),
-    prisma.transaction.aggregate({ _sum: { amount: true }, where: { accountId, type: "EXPENSE" } }),
-  ]);
-  const newBalance = Number(income._sum.amount || 0) - Number(expense._sum.amount || 0);
-  await prisma.account.update({ where: { id: accountId }, data: { balance: newBalance } });
+  // Every account touched by a removed transfer needs its balance redone
+  const touched = new Set([accountId]);
+  for (const t of affected) {
+    touched.add(t.accountId);
+    if (t.toAccountId) touched.add(t.toAccountId);
+  }
+  let newBalance = 0;
+  for (const id of touched) {
+    const balance = await recalculateBalance(id);
+    if (id === accountId) newBalance = balance;
+  }
 
-  res.json({ deleted: deleted.count, newBalance });
+  res.json({ deleted: deleted.count, newBalance, accountsUpdated: touched.size });
 });
 
 module.exports = router;

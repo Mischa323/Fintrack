@@ -234,8 +234,32 @@ export default function Accounts() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [holdingsFor, setHoldingsFor] = useState(null);
+  const [recalculating, setRecalculating] = useState(null);
+  const [recalcMsg, setRecalcMsg] = useState(null);
 
   const load = () => accountsApi.list().then(setItems);
+
+  // Imports only write transactions; the stored balance is not touched. This
+  // derives it again from what is actually recorded.
+  const recalc = async (account) => {
+    setRecalculating(account.id);
+    setRecalcMsg(null);
+    try {
+      const before = Number(account.balance);
+      const updated = await accountsApi.recalculate(account.id);
+      const after = Number(updated.balance);
+      setRecalcMsg(
+        Math.abs(after - before) < 0.005
+          ? `${account.name}: balance already matched its transactions`
+          : `${account.name}: balance corrected from ${before.toFixed(2)} to ${after.toFixed(2)}`
+      );
+      load();
+    } catch (e) {
+      setRecalcMsg(`${account.name}: ${e.response?.data?.error || e.message}`);
+    } finally {
+      setRecalculating(null);
+    }
+  };
   useEffect(() => { load(); }, []);
 
   const open = (item = null) => {
@@ -278,6 +302,17 @@ export default function Accounts() {
         <button className="glass-btn glass-btn-primary" style={{ padding: "10px 20px" }} onClick={() => open()}>+ Add Account</button>
       </div>
 
+      {recalcMsg && (
+        <div style={{
+          borderRadius: 12, padding: "12px 16px", fontSize: 14,
+          background: "rgba(52,211,153,0.12)", border: "1px solid rgba(52,211,153,0.3)",
+          color: "#34d399", display: "flex", justifyContent: "space-between", gap: 12,
+        }}>
+          <div>{recalcMsg}</div>
+          <button onClick={() => setRecalcMsg(null)} style={{ background: "none", border: "none", color: "rgba(255,255,255,0.3)", cursor: "pointer", padding: 0, fontSize: 16 }}>×</button>
+        </div>
+      )}
+
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(280px,1fr))", gap: 16 }}>
         {items.map((a) => (
           <GlassCard key={a.id} style={{ borderLeft: `4px solid ${a.color}` }}>
@@ -307,6 +342,15 @@ export default function Accounts() {
               {a.type === "INVESTMENT" && (
                 <button className="glass-btn glass-btn-ghost" style={{ padding: "6px 12px", fontSize: 13, whiteSpace: "nowrap" }} onClick={() => setHoldingsFor(a)}>Holdings</button>
               )}
+              <button
+                className="glass-btn glass-btn-ghost"
+                style={{ padding: "6px 12px", fontSize: 13, whiteSpace: "nowrap" }}
+                onClick={() => recalc(a)}
+                disabled={recalculating === a.id}
+                title="Recalculate this balance from its transactions"
+              >
+                {recalculating === a.id ? "…" : "↻ Balance"}
+              </button>
               <button className="glass-btn glass-btn-ghost" style={{ padding: "6px 12px", fontSize: 13, whiteSpace: "nowrap" }} onClick={() => open(a)}>Edit</button>
               <button className="glass-btn glass-btn-danger" style={{ padding: "6px 12px", fontSize: 13, whiteSpace: "nowrap" }} onClick={() => remove(a.id)}>Delete</button>
             </div>

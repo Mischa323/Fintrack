@@ -1,6 +1,7 @@
 const express = require("express");
 const { PrismaClient } = require("@prisma/client");
 const { normaliseIban } = require("../services/iban");
+const { recalculateBalance } = require("../services/accountBalance");
 
 const router = express.Router();
 const prisma = new PrismaClient();
@@ -36,22 +37,9 @@ router.delete("/:id", async (req, res) => {
 
 // Recalculate account balance from transactions
 router.post("/:id/recalculate", async (req, res) => {
-  const id = req.params.id;
-  // Transfers are stored as a single row on the paying account, so money
-  // arriving via toAccountId has to be counted too.
-  const transactions = await prisma.transaction.findMany({
-    where: { OR: [{ accountId: id }, { toAccountId: id }] },
-  });
-  const balance = transactions.reduce((sum, t) => {
-    if (t.toAccountId === id) return sum + Number(t.amount); // incoming transfer
-    if (t.type === "INCOME") return sum + Number(t.amount);
-    return sum - Number(t.amount); // EXPENSE, or a transfer leaving this account
-  }, 0);
-  const account = await prisma.account.update({
-    where: { id: req.params.id },
-    data: { balance },
-  });
-  res.json(account);
+  const balance = await recalculateBalance(req.params.id);
+  const account = await prisma.account.findUnique({ where: { id: req.params.id } });
+  res.json({ ...account, balance });
 });
 
 module.exports = router;
