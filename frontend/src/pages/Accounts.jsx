@@ -239,8 +239,37 @@ export default function Accounts() {
 
   const load = () => accountsApi.list().then(setItems);
 
-  // Imports only write transactions; the stored balance is not touched. This
-  // derives it again from what is actually recorded.
+  // Imported history never starts at zero, so summing transactions alone says
+  // nothing about the real balance. Entering what the bank shows derives the
+  // opening balance that makes the recorded movements add up to it.
+  const reconcile = async (account) => {
+    const entered = window.prompt(
+      `What does the bank actually show for "${account.name}"?\n\n`
+        + "FinTrack works out the starting balance from this, so future imports stay correct.",
+      Number(account.balance).toFixed(2)
+    );
+    if (entered === null) return;
+    const value = Number(String(entered).replace(",", "."));
+    if (isNaN(value)) { setRecalcMsg(`"${entered}" is not a number`); return; }
+
+    setRecalculating(account.id);
+    setRecalcMsg(null);
+    try {
+      const r = await accountsApi.reconcile(account.id, value);
+      setRecalcMsg(
+        `${account.name}: set to ${r.balance.toFixed(2)} — `
+          + `${r.movements.toFixed(2)} from recorded transactions, `
+          + `${r.openingBalance.toFixed(2)} from before them`
+      );
+      load();
+    } catch (e) {
+      setRecalcMsg(`${account.name}: ${e.response?.data?.error || e.message}`);
+    } finally {
+      setRecalculating(null);
+    }
+  };
+
+  // Re-derives the stored balance as openingBalance + recorded movements.
   const recalc = async (account) => {
     setRecalculating(account.id);
     setRecalcMsg(null);
@@ -345,11 +374,20 @@ export default function Accounts() {
               <button
                 className="glass-btn glass-btn-ghost"
                 style={{ padding: "6px 12px", fontSize: 13, whiteSpace: "nowrap" }}
+                onClick={() => reconcile(a)}
+                disabled={recalculating === a.id}
+                title="Enter the balance your bank shows; the starting balance is derived from it"
+              >
+                {recalculating === a.id ? "…" : "€ Set balance"}
+              </button>
+              <button
+                className="glass-btn glass-btn-ghost"
+                style={{ padding: "6px 12px", fontSize: 13, whiteSpace: "nowrap" }}
                 onClick={() => recalc(a)}
                 disabled={recalculating === a.id}
-                title="Recalculate this balance from its transactions"
+                title="Re-derive the balance from the starting balance plus recorded transactions"
               >
-                {recalculating === a.id ? "…" : "↻ Balance"}
+                ↻
               </button>
               <button className="glass-btn glass-btn-ghost" style={{ padding: "6px 12px", fontSize: 13, whiteSpace: "nowrap" }} onClick={() => open(a)}>Edit</button>
               <button className="glass-btn glass-btn-danger" style={{ padding: "6px 12px", fontSize: 13, whiteSpace: "nowrap" }} onClick={() => remove(a.id)}>Delete</button>

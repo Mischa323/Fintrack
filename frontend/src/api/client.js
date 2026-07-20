@@ -29,6 +29,7 @@ export const accounts = {
   update: (id, data) => api.put(`/accounts/${id}`, data).then((r) => r.data),
   remove: (id) => api.delete(`/accounts/${id}`),
   recalculate: (id) => api.post(`/accounts/${id}/recalculate`).then((r) => r.data),
+  reconcile: (id, balance) => api.post(`/accounts/${id}/reconcile`, { balance }).then((r) => r.data),
 };
 
 export const transactions = {

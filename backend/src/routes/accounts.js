@@ -1,7 +1,7 @@
 const express = require("express");
 const { PrismaClient } = require("@prisma/client");
 const { normaliseIban } = require("../services/iban");
-const { recalculateBalance } = require("../services/accountBalance");
+const { recalculateBalance, reconcileToBalance, sumTransactions } = require("../services/accountBalance");
 
 const router = express.Router();
 const prisma = new PrismaClient();
@@ -35,11 +35,24 @@ router.delete("/:id", async (req, res) => {
   res.status(204).end();
 });
 
-// Recalculate account balance from transactions
+// Recalculate account balance: openingBalance + recorded movements
 router.post("/:id/recalculate", async (req, res) => {
   const balance = await recalculateBalance(req.params.id);
+  if (balance === null) return res.status(404).json({ error: "Account not found" });
   const account = await prisma.account.findUnique({ where: { id: req.params.id } });
-  res.json({ ...account, balance });
+  const movements = await sumTransactions(req.params.id);
+  res.json({ ...account, balance, movements });
+});
+
+// Tell FinTrack what the bank actually shows; the opening balance is derived so
+// the recorded transactions add up to it.
+router.post("/:id/reconcile", async (req, res) => {
+  const { balance } = req.body;
+  if (balance === undefined || isNaN(Number(balance))) {
+    return res.status(400).json({ error: "A numeric balance is required" });
+  }
+  const result = await reconcileToBalance(req.params.id, Number(balance));
+  res.json(result);
 });
 
 module.exports = router;

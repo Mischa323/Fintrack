@@ -16,6 +16,9 @@ model Account {
   type         String
   currency     String                 @default("EUR")
   balance      Decimal                @default(0)
+  // Balance before the first recorded transaction. Imported history is never
+  // complete, so the derived balance is openingBalance + sum(transactions).
+  openingBalance Decimal              @default(0)
   color        String                 @default("#6366f1")
   icon         String?
   institution  String?
