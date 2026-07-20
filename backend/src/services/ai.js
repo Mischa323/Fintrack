@@ -32,6 +32,7 @@ async function getConfig() {
   return {
     url: normaliseUrl(settings.aiUrl),
     model: settings.aiModel || null,
+    language: (settings.aiLanguage || "").trim() || null,
   };
 }
 
@@ -61,24 +62,31 @@ async function checkConnection() {
   }
 }
 
-function buildPrompt(rows, categories) {
+function buildPrompt(rows, categories, language) {
+  // A stated language biases the model toward it; without one it is told to
+  // expect anything, since a single account often mixes languages (a Dutch
+  // account with German and Austrian purchases, say).
+  const intro = language
+    ? `You are labelling bank transactions, mostly in ${language}. Some may be in other languages.`
+    : "You are labelling bank transactions. They may be in any language — Dutch, English, German, French and others can appear in the same batch.";
   return [
-    "You are labelling Dutch bank transactions.",
+    intro,
     "",
     "For each transaction return:",
     "- category: exactly one from the list below, nothing else",
     "- name: the merchant, cleaned up",
     "",
     "Cleaning rules for name:",
+    "- Keep the merchant's own name in its own language; never translate it",
     "- Use Title Case, never ALL CAPS",
-    "- Remove payment noise: BEA, Betaalpas, Apple Pay, PAS123, terminal codes, times, dates",
+    "- Remove payment noise: BEA, Betaalpas, Apple Pay, PAS123, terminal codes, city names, times, dates",
     "- Remove payment providers like BUCKAROO, Mollie, Adyen, iDEAL, and any * prefix",
     "- Keep it to 1-4 words: the shop or company only",
     "",
-    "Category hints:",
-    "- Fuel, petrol, tanken, Esso, Shell, BP, parking, public transport -> Transportation",
-    "- Supermarkets (Albert Heijn, Lidl, Jumbo, Deka, Aldi) -> Groceries",
-    "- Bank fees, interest, renteafsluiting -> whichever list entry covers fees",
+    "Category hints (any language):",
+    "- Fuel, petrol, tanken, Tankstelle, Esso, Shell, BP, parking, transit -> Transportation",
+    "- Supermarkets (Albert Heijn, Lidl, Jumbo, Aldi, Rewe, Edeka, Carrefour) -> Groceries",
+    "- Bank fees and interest (renteafsluiting, Zinsen) -> whichever entry covers fees",
     "",
     "Examples:",
     '"BEA, Apple Pay ALBERT HEIJN 5678, PAS144" -> "Albert Heijn"',
@@ -134,7 +142,7 @@ function unwrap(parsed, key) {
 // Returns one suggestion per transaction that the model answered for. Anything
 // it skipped or answered nonsensically is simply left out rather than guessed.
 async function suggestForTransactions(transactionIds) {
-  const { url, model } = await getConfig();
+  const { url, model, language } = await getConfig();
   if (!model) throw new Error("No model configured — set one in Settings first");
 
   const transactions = await prisma.transaction.findMany({
@@ -161,7 +169,7 @@ async function suggestForTransactions(transactionIds) {
 
     let answers;
     try {
-      answers = unwrap(await askModel(url, model, buildPrompt(rows, names)), "results");
+      answers = unwrap(await askModel(url, model, buildPrompt(rows, names, language)), "results");
     } catch {
       failed += batch.length;
       continue;

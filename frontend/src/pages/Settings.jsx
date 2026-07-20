@@ -595,11 +595,13 @@ function ServerConfig() {
 
 // ── Local AI (Ollama) ─────────────────────────────────────────
 function AiConfig() {
-  const [config, setConfig] = useState({ aiUrl: "", aiModel: "" });
+  const [config, setConfig] = useState({ aiUrl: "", aiModel: "", aiLanguage: "" });
   const [loaded, setLoaded] = useState(false);
   const [status, setStatus] = useState(null);
   const [testing, setTesting] = useState(false);
   const [msg, setMsg] = useState(null);
+
+  const LANGUAGES = ["Dutch", "English", "German", "French", "Spanish", "Italian"];
 
   const check = () => {
     setTesting(true);
@@ -611,7 +613,7 @@ function AiConfig() {
 
   useEffect(() => {
     api.get("/config").then((r) => {
-      setConfig({ aiUrl: r.data.aiUrl ?? "", aiModel: r.data.aiModel ?? "" });
+      setConfig({ aiUrl: r.data.aiUrl ?? "", aiModel: r.data.aiModel ?? "", aiLanguage: r.data.aiLanguage ?? "" });
       setLoaded(true);
       check();
     });
@@ -621,7 +623,7 @@ function AiConfig() {
     e.preventDefault();
     setMsg(null);
     try {
-      await api.put("/config", { aiUrl: config.aiUrl, aiModel: config.aiModel });
+      await api.put("/config", { aiUrl: config.aiUrl, aiModel: config.aiModel, aiLanguage: config.aiLanguage });
       setMsg({ type: "success", text: "Saved" });
       check();
     } catch (err) {
@@ -669,6 +671,22 @@ function AiConfig() {
             />
           )}
         </Field>
+      </div>
+
+      <Field label="Transaction language">
+        <select
+          className="glass-input" style={inp}
+          value={config.aiLanguage}
+          onChange={(e) => setConfig((c) => ({ ...c, aiLanguage: e.target.value }))}
+        >
+          <option value="">Auto-detect (any language)</option>
+          {LANGUAGES.map((l) => <option key={l} value={l}>{l}</option>)}
+        </select>
+      </Field>
+      <div style={{ fontSize: 12, color: "rgba(255,255,255,0.35)", lineHeight: 1.7, margin: "6px 0 16px" }}>
+        A hint about the language your transactions are usually in. Auto-detect handles a mix — a
+        Dutch account with German or French purchases works fine either way. Merchant names are
+        kept in their own language, never translated.
       </div>
 
       <div style={{

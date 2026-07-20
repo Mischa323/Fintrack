@@ -88,7 +88,7 @@ To actually get Watchtower auto-updates, images must be published (GitHub Action
 
 `backend/package.json` `version` is the **single source of truth** — bump it on
 every meaningful change (keep `frontend/package.json` in sync for tidiness).
-Currently **1.14.0**.
+Currently **1.15.0**.
 
 - `GET /version` → `{ version, buildTime }` (authenticated)
 - `GET /version/check` → compares against the `version` in `backend/package.json`
@@ -178,6 +178,7 @@ tidy imported transaction descriptions. Configured in Settings → Local AI
   ones", not "merge if you think you should" — offered the easy out, a 7B model
   returns an empty list every time. `unwrap()` tolerates bare arrays and any
   wrapper key, since the model is inconsistent about which it uses.
+- The prompt is language-aware: `Settings.aiLanguage` gives a primary-language hint, empty = multilingual (a Dutch account with German/French purchases works either way). Merchant names are kept in their own language, never translated.
 - The container cannot reach the host on `localhost`; default is
   `host.docker.internal:11434`, and Ollama needs `OLLAMA_HOST=0.0.0.0`.
 - The prompt carries category hints (fuel -> Transportation, supermarkets ->
