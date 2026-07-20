@@ -147,21 +147,21 @@ transactions from all accounts landed on one.
 ## Local AI (Ollama)
 
 Optional: point FinTrack at an Ollama the user runs to suggest categories and
-tidy imported transaction descriptions. Configured in Settings -> Local AI
-(, ); nothing is sent anywhere else.
+tidy imported transaction descriptions. Configured in Settings → Local AI
+(`Settings.aiUrl`, `Settings.aiModel`); nothing is sent anywhere else.
 
--  batches 20 transactions per request, temperature 0,
-  .
-- **Ask for a wrapped array** (). With a bare array a 7B model
+- `services/ai.js` batches 20 transactions per request, temperature 0,
+  `format: "json"`.
+- **Ask for a wrapped array** (`{"results":[...]}`). With a bare array a 7B model
   returns only the first object — measured: 1 of 8 rows.
-- Suggestions are **never applied automatically**.  proposes,
-  the UI shows each next to the original,  writes only what was
+- Suggestions are **never applied automatically**. `POST /ai/suggest` proposes,
+  the UI shows each next to the original, `POST /ai/apply` writes only what was
   confirmed. Small models misfile categories and do occasionally invent a word
-  (observed: Zorgverzkekering -> Zorgverzekeringsmaandag).
+  (observed: `Zorgverzkekering` → `Zorgverzekeringsmaandag`).
 - A suggested category that does not exist is rejected and reported rather than
   created, so the model cannot invent categories.
-- The container cannot reach the host on ; default is
-  , and Ollama needs .
+- The container cannot reach the host on `localhost`; default is
+  `host.docker.internal:11434`, and Ollama needs `OLLAMA_HOST=0.0.0.0`.
 - The prompt carries category hints (fuel -> Transportation, supermarkets ->
   Groceries) because without them a 7B model filed petrol under Utilities.
 
