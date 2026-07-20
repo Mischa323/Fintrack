@@ -300,13 +300,15 @@ export default function Accounts() {
                 </div>
               </div>
             </div>
-            <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
-              <button className="glass-btn glass-btn-ghost" style={{ padding: "6px 14px", fontSize: 13 }} onClick={() => navigate(`/transactions?accountId=${a.id}`)}>Transactions</button>
+            {/* Wraps: investment accounts carry a fourth button that would
+                otherwise push Delete off the card. */}
+            <div style={{ display: "flex", gap: 8, marginTop: 16, flexWrap: "wrap" }}>
+              <button className="glass-btn glass-btn-ghost" style={{ padding: "6px 12px", fontSize: 13, whiteSpace: "nowrap" }} onClick={() => navigate(`/transactions?accountId=${a.id}`)}>Transactions</button>
               {a.type === "INVESTMENT" && (
-                <button className="glass-btn glass-btn-ghost" style={{ padding: "6px 14px", fontSize: 13 }} onClick={() => setHoldingsFor(a)}>Holdings</button>
+                <button className="glass-btn glass-btn-ghost" style={{ padding: "6px 12px", fontSize: 13, whiteSpace: "nowrap" }} onClick={() => setHoldingsFor(a)}>Holdings</button>
               )}
-              <button className="glass-btn glass-btn-ghost" style={{ padding: "6px 14px", fontSize: 13 }} onClick={() => open(a)}>Edit</button>
-              <button className="glass-btn glass-btn-danger" style={{ padding: "6px 14px", fontSize: 13 }} onClick={() => remove(a.id)}>Delete</button>
+              <button className="glass-btn glass-btn-ghost" style={{ padding: "6px 12px", fontSize: 13, whiteSpace: "nowrap" }} onClick={() => open(a)}>Edit</button>
+              <button className="glass-btn glass-btn-danger" style={{ padding: "6px 12px", fontSize: 13, whiteSpace: "nowrap" }} onClick={() => remove(a.id)}>Delete</button>
             </div>
           </GlassCard>
         ))}
