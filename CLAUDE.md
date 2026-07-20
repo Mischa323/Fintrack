@@ -88,7 +88,7 @@ To actually get Watchtower auto-updates, images must be published (GitHub Action
 
 `backend/package.json` `version` is the **single source of truth** — bump it on
 every meaningful change (keep `frontend/package.json` in sync for tidiness).
-Currently **1.16.0**.
+Currently **1.16.1**.
 
 - `GET /version` → `{ version, buildTime }` (authenticated)
 - `GET /version/check` → compares against the `version` in `backend/package.json`
@@ -276,6 +276,7 @@ The dashboard defaults to **this year**, with a selector for This year / 1 / 2 /
 - Range boundaries are anchored to **UTC midnight** (`Date.UTC`) because
   transaction dates are stored date-only in UTC; a local-midnight boundary
   silently pulled in the previous year's final day.
+- `GET /transactions?accountId=` returns the account's `openingBalance` (set via reconcile / "Set balance") so the UI can pin an "Opening balance" row at the bottom of that account's history. It is not a transaction — it stays out of income/expense — only surfaced when a single account is in view.
 - "Total Balance" is deliberately *not* range-filtered — it is the accounts'
   current balance, not a sum over the period.
 

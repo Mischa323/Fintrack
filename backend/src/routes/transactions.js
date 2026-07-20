@@ -39,7 +39,22 @@ router.get("/", async (req, res) => {
     prisma.transaction.count({ where }),
   ]);
 
-  res.json({ transactions, total, page: Number(page), limit: Number(limit) });
+  // When one account is in view, surface its opening balance (set via "Set
+  // balance") so the recorded history plus the opening add up to the shown
+  // balance. It is not a transaction — it stays out of income/expense — so it is
+  // returned separately for the UI to pin, not mixed into the rows.
+  let openingBalance = null;
+  if (accountId) {
+    const account = await prisma.account.findUnique({
+      where: { id: accountId },
+      select: { openingBalance: true },
+    });
+    if (account && Number(account.openingBalance) !== 0) {
+      openingBalance = Number(account.openingBalance);
+    }
+  }
+
+  res.json({ transactions, total, page: Number(page), limit: Number(limit), openingBalance });
 });
 
 // Net balance correction per account, so a bulk action touches each account
