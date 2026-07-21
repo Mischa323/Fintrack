@@ -23,6 +23,7 @@ router.get("/", async (req, res) => {
     transferDetection: s.transferDetection || "confirm",
     aiUrl: s.aiUrl ?? "",
     aiModel: s.aiModel ?? "",
+    aiVisionModel: s.aiVisionModel ?? "",
     aiLanguage: s.aiLanguage ?? "",
     oidcEnabled: s.oidcEnabled,
     oidcTenantId: s.oidcTenantId ?? "",
@@ -37,7 +38,7 @@ router.get("/", async (req, res) => {
 // PUT /config
 router.put("/", async (req, res) => {
   const {
-    appName, defaultCurrency, appPort, jwtSecret, transferDetection, aiUrl, aiModel, aiLanguage,
+    appName, defaultCurrency, appPort, jwtSecret, transferDetection, aiUrl, aiModel, aiVisionModel, aiLanguage,
     oidcEnabled, oidcTenantId, oidcClientId, oidcClientSecret,
     googleOidcEnabled, googleClientId, googleClientSecret,
   } = req.body;
@@ -48,6 +49,7 @@ router.put("/", async (req, res) => {
   if (jwtSecret !== undefined) data.jwtSecret = jwtSecret || null;
   if (aiUrl !== undefined) data.aiUrl = aiUrl || null;
   if (aiModel !== undefined) data.aiModel = aiModel || null;
+  if (aiVisionModel !== undefined) data.aiVisionModel = aiVisionModel || null;
   if (aiLanguage !== undefined) data.aiLanguage = aiLanguage || null;
   if (transferDetection !== undefined && ["off","auto","confirm"].includes(transferDetection)) data.transferDetection = transferDetection;
   if (oidcEnabled !== undefined) data.oidcEnabled = Boolean(oidcEnabled);

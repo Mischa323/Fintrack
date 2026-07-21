@@ -3,7 +3,7 @@ const multer = require("multer");
 const path = require("path");
 const fs = require("fs");
 const { PrismaClient } = require("@prisma/client");
-const { extractFromImage, findMatches } = require("../services/receipts");
+const { extractFromFile, findMatches } = require("../services/receipts");
 const { recalculateBalance } = require("../services/accountBalance");
 
 const router = express.Router();
@@ -18,9 +18,12 @@ const upload = multer({
   dest: RECEIPT_DIR,
   limits: { fileSize: 15 * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
-    if (/^image\//.test(file.mimetype)) return cb(null, true);
-    // A PDF would need rasterising first, which no dependency here does.
-    cb(new Error("Only image files are supported — photograph or screenshot the document"));
+    // A PDF invoice or payslip carries real text, so it is read directly rather
+    // than rasterised; photos go through the vision model.
+    if (/^image\//.test(file.mimetype) || file.mimetype === "application/pdf") {
+      return cb(null, true);
+    }
+    cb(new Error("Upload an image or a PDF"));
   },
 });
 
@@ -48,19 +51,18 @@ router.get("/:id/image", async (req, res) => {
   const receipt = await prisma.receipt.findUnique({ where: { id: req.params.id } });
   if (!receipt) return res.status(404).json({ error: "Receipt not found" });
   const file = path.join(RECEIPT_DIR, receipt.storedName);
-  if (!fs.existsSync(file)) return res.status(404).json({ error: "Image file is missing" });
+  if (!fs.existsSync(file)) return res.status(404).json({ error: "The stored file is missing" });
   res.type(receipt.mimeType).sendFile(file);
 });
 
-// POST /receipts — upload an image, read it, and look for the transaction it
+// POST /receipts — upload a document, read it, and look for the transaction it
 // belongs to. Nothing is linked or created here; the response is a proposal.
 router.post("/", upload.single("file"), async (req, res) => {
-  if (!req.file) return res.status(400).json({ error: "An image file is required" });
+  if (!req.file) return res.status(400).json({ error: "An image or PDF file is required" });
 
   let extracted;
   try {
-    const base64 = fs.readFileSync(req.file.path).toString("base64");
-    extracted = await extractFromImage(base64);
+    extracted = await extractFromFile(fs.readFileSync(req.file.path), req.file.mimetype);
   } catch (err) {
     // The upload is worthless without extraction, so do not keep the file
     try { fs.unlinkSync(req.file.path); } catch {}
@@ -85,6 +87,39 @@ router.post("/", upload.single("file"), async (req, res) => {
 
   const matches = await findMatches(extracted);
   res.status(201).json({ receipt, extracted, matches });
+});
+
+// POST /receipts/auto-link — link every pending receipt whose best candidate is
+// a strong match, and report the rest so they can still be reviewed by hand.
+// Declared before "/:id" routes so the literal path wins.
+router.post("/auto-link", async (req, res) => {
+  const pending = await prisma.receipt.findMany({ where: { status: "PENDING" } });
+
+  const linked = [];
+  const needsReview = [];
+  for (const receipt of pending) {
+    const matches = await findMatches({
+      merchant: receipt.merchant,
+      date: receipt.date,
+      amount: receipt.amount == null ? null : Number(receipt.amount),
+      kind: receipt.kind,
+    });
+    const best = matches[0];
+    // Only an unambiguous winner is linked without asking: a strong match, and
+    // no second candidate scoring just as high.
+    const unambiguous = best && best.confident && (!matches[1] || matches[1].score < best.score);
+    if (!unambiguous) {
+      needsReview.push({ id: receipt.id, filename: receipt.filename, merchant: receipt.merchant, candidates: matches.length });
+      continue;
+    }
+    await prisma.receipt.update({
+      where: { id: receipt.id },
+      data: { transactionId: best.id, status: "MATCHED" },
+    });
+    linked.push({ id: receipt.id, merchant: receipt.merchant, transaction: best.description });
+  }
+
+  res.json({ linked: linked.length, needsReview: needsReview.length, details: { linked, needsReview } });
 });
 
 // POST /receipts/:id/link — attach this receipt to an existing transaction

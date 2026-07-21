@@ -1,6 +1,6 @@
 {
   "name": "finance-tracker-backend",
-  "version": "1.17.0",
+  "version": "1.18.0",
   "type": "commonjs",
   "scripts": {
     "postinstall": "prisma generate && prisma migrate deploy",
@@ -27,6 +27,7 @@
     "multer": "^1.4.5-lts.1",
     "node-cron": "^3.0.3",
     "openid-client": "^4.9.1",
+    "pdf-parse": "^2.4.5",
     "qrcode": "^1.5.4",
     "speakeasy": "^2.0.0",
     "ssh2-sftp-client": "^11.0.0"

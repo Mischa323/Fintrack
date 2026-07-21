@@ -88,7 +88,7 @@ To actually get Watchtower auto-updates, images must be published (GitHub Action
 
 `backend/package.json` `version` is the **single source of truth** — bump it on
 every meaningful change (keep `frontend/package.json` in sync for tidiness).
-Currently **1.17.0**.
+Currently **1.18.0**.
 
 - `GET /version` → `{ version, buildTime }` (authenticated)
 - `GET /version/check` → compares against the `version` in `backend/package.json`
@@ -184,29 +184,41 @@ tidy imported transaction descriptions. Configured in Settings → Local AI
 - The prompt carries category hints (fuel -> Transportation, supermarkets ->
   Groceries) because without them a 7B model filed petrol under Utilities.
 
-## Receipts (vision model)
+## Receipts, invoices and payslips
 
-Photograph a receipt, invoice or payslip; a local vision model reads it and it is
-matched to the transaction it belongs to. `services/receipts.js` extracts,
-`routes/receipts.js` stores and links. Images live in `uploads/receipts`.
+Upload receipts, invoices or payslips (images and PDFs, several at once) and each
+is read and matched to the transaction it belongs to. `services/receipts.js`
+extracts, `routes/receipts.js` stores and links. Files live in `uploads/receipts`.
 
-- **Requires a vision model** (`qwen3-vl`); a text-only model is rejected with a
-  message naming one. Check `capabilities` on `/api/tags` for `vision`.
-- **Do not set `format`** on a vision request. Both `format:"json"` and a JSON
-  schema make qwen3-vl return an *empty* response; free text works. The JSON is
-  asked for in the prompt and pulled out with brace matching.
-- `think:false` is **not honoured** — the model reasons anyway and the reasoning
-  eats `num_predict`, leaving an empty answer if the budget runs out. Hence
-  `num_predict: 2500`, and `thinking` is used as a fallback source for the JSON.
+**Two models, deliberately separate** (`Settings.aiModel` and
+`Settings.aiVisionModel`):
+- **PDFs are read as text**, never rasterised — `pdf-parse` pulls the text and the
+  ordinary text model extracts from it. Measured on a real invoice and payslip:
+  **1.6-1.8s and correct**, against 60s and a failure through the vision model.
+- **Images** go to the vision model. ~20s for a receipt photo.
+- A scanned PDF (no text layer) is rejected with a message telling the user to
+  upload a photo instead.
+
+Vision-model gotchas, all worked around (qwen3-vl on Ollama 0.32):
+- **Never set `format`** on an image request. Both `format:"json"` and a JSON
+  schema return an *empty* response; free text works. The text path does use
+  `format:"json"`, which is what keeps it reliable.
+- **`think:false` is ignored.** It reasons regardless, and the reasoning consumes
+  `num_predict` — on a long payslip it burned 11k characters of thinking and never
+  answered, even at 6000 tokens. This is why text does not go through it.
 - Field names and formats drift per run (`total_amount` vs `amount`, `12-07-2026`
   vs ISO, `"21,80"`), so `pick()` accepts several names and the parsers handle
   day-first dates and comma decimals.
-- Matching scores amount first (>0.5 apart is rejected outright), then date
-  (±5 days), then a merchant-word hit; a payslip matches INCOME, everything else
-  EXPENSE. Only >=90 is called a strong match.
-- Nothing is written automatically: extraction and matching propose, the user
-  links, dismisses, or creates a transaction with the values corrected.
-- Extraction takes 20-40s per image on an 8B model.
+
+Matching scores amount first (>0.5 apart is rejected outright), then date within
+±5 days, then a merchant-word hit; a payslip matches INCOME, everything else
+EXPENSE. Only >=90 counts as strong.
+
+`POST /receipts/auto-link` links every pending document whose best candidate is
+strong **and** unambiguous (no runner-up scoring as high), leaving the rest for
+review — so a batch can be approved in one click without guessing. Nothing else
+is ever written automatically; the image is shown beside the values so a misread
+digit is caught before it becomes a transaction.
 
 ## Investments (holdings)
 

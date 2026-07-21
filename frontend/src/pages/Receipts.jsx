@@ -204,11 +204,14 @@ export default function Receipts() {
   const [accounts, setAccounts] = useState([]);
   const [categories, setCategories] = useState([]);
   const [uploading, setUploading] = useState(false);
+  const [progress, setProgress] = useState(null);
+  const [linking, setLinking] = useState(false);
   const [msg, setMsg] = useState(null);
   const [review, setReview] = useState(null);
   const fileRef = useRef();
 
   const load = () => receiptsApi.list().then(setItems);
+  const pendingCount = items.filter((r) => r.status === "PENDING").length;
   useEffect(() => {
     load();
     accountsApi.list().then(setAccounts);
@@ -219,22 +222,56 @@ export default function Receipts() {
     if (!files?.length) return;
     setUploading(true);
     setMsg(null);
-    try {
-      // One at a time: the model reads a single image per request, and this
-      // gives a usable message when one of several photos fails.
-      let last = null;
-      for (const file of files) {
+
+    // One at a time: the model reads a single document per request. A failure on
+    // one file must not lose the rest, so each is caught and reported at the end.
+    let last = null;
+    let done = 0;
+    const failed = [];
+    for (const [index, file] of files.entries()) {
+      setProgress({ current: index + 1, total: files.length, name: file.name });
+      try {
         last = await receiptsApi.upload(file);
+        done++;
+      } catch (e) {
+        failed.push(`${file.name}: ${e.response?.data?.error || e.message}`);
       }
+    }
+
+    setProgress(null);
+    setUploading(false);
+    await load();
+
+    if (done === 0) {
+      setMsg({ error: true, text: failed[0] || "Nothing could be read" });
+      return;
+    }
+    setMsg({
+      text: `Read ${done} of ${files.length} document${files.length === 1 ? "" : "s"}`
+        + (failed.length ? ` — ${failed.length} failed: ${failed[0]}` : ""),
+      error: failed.length > 0 && done === 0,
+    });
+    // A single upload goes straight to review; a batch is reviewed from the list
+    if (files.length === 1 && last) setReview({ receipt: last.receipt, matches: last.matches });
+  };
+
+  // Links everything whose best candidate is unambiguous and leaves the rest
+  const autoLink = async () => {
+    setLinking(true);
+    setMsg(null);
+    try {
+      const r = await receiptsApi.autoLink();
       await load();
-      setMsg({ text: `Read ${files.length} document${files.length === 1 ? "" : "s"}` });
-      if (files.length === 1 && last) {
-        setReview({ receipt: last.receipt, matches: last.matches });
-      }
+      setMsg({
+        text: r.linked > 0
+          ? `Linked ${r.linked} document${r.linked === 1 ? "" : "s"}`
+            + (r.needsReview ? `, ${r.needsReview} still need${r.needsReview === 1 ? "s" : ""} review` : "")
+          : `Nothing was linked — ${r.needsReview} document${r.needsReview === 1 ? "" : "s"} need review`,
+      });
     } catch (e) {
       setMsg({ error: true, text: e.response?.data?.error || e.message });
     } finally {
-      setUploading(false);
+      setLinking(false);
     }
   };
 
@@ -251,11 +288,24 @@ export default function Receipts() {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
-      <div>
-        <h1 style={{ fontSize: 26, fontWeight: 700, margin: 0 }}>Receipts</h1>
-        <p style={{ color: "rgba(255,255,255,0.45)", margin: "4px 0 0", fontSize: 14 }}>
-          Photograph a receipt, invoice or payslip and it is matched to the transaction it belongs to
-        </p>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, flexWrap: "wrap" }}>
+        <div>
+          <h1 style={{ fontSize: 26, fontWeight: 700, margin: 0 }}>Receipts</h1>
+          <p style={{ color: "rgba(255,255,255,0.45)", margin: "4px 0 0", fontSize: 14 }}>
+            Upload receipts, invoices or payslips and they are matched to the transactions they belong to
+          </p>
+        </div>
+        {pendingCount > 0 && (
+          <button
+            className="glass-btn glass-btn-primary"
+            style={{ padding: "10px 18px", opacity: linking ? 0.5 : 1 }}
+            onClick={autoLink}
+            disabled={linking}
+            title="Link every document whose match is unambiguous; the rest stay for review"
+          >
+            {linking ? "Linking…" : `✓ Link ${pendingCount} strong match${pendingCount === 1 ? "" : "es"}`}
+          </button>
+        )}
       </div>
 
       {review && (
@@ -281,15 +331,17 @@ export default function Receipts() {
         >
           <div style={{ fontSize: 28, marginBottom: 6 }}>🧾</div>
           <div style={{ fontWeight: 500 }}>
-            {uploading ? "Reading the document…" : "Drop a photo of a receipt, invoice or payslip"}
+            {uploading
+              ? (progress ? `Reading ${progress.current} of ${progress.total}: ${progress.name}` : "Reading…")
+              : "Drop receipts, invoices or payslips here"}
           </div>
           <div style={{ fontSize: 13, color: "rgba(255,255,255,0.4)", marginTop: 4 }}>
             {uploading
-              ? "This takes up to a minute per image on a local model"
-              : "or click to browse — images only"}
+              ? "PDFs take a second or two; photos up to a minute on a local model"
+              : "or click to browse — images and PDFs, several at once"}
           </div>
         </div>
-        <input ref={fileRef} type="file" accept="image/*" multiple style={{ display: "none" }} onChange={(e) => upload([...e.target.files])} />
+        <input ref={fileRef} type="file" accept="image/*,application/pdf" multiple style={{ display: "none" }} onChange={(e) => upload([...e.target.files])} />
 
         {msg && (
           <div style={{ marginTop: 14, fontSize: 13, color: msg.error ? "#f87171" : "#34d399" }}>

@@ -595,7 +595,7 @@ function ServerConfig() {
 
 // ── Local AI (Ollama) ─────────────────────────────────────────
 function AiConfig() {
-  const [config, setConfig] = useState({ aiUrl: "", aiModel: "", aiLanguage: "" });
+  const [config, setConfig] = useState({ aiUrl: "", aiModel: "", aiVisionModel: "", aiLanguage: "" });
   const [loaded, setLoaded] = useState(false);
   const [status, setStatus] = useState(null);
   const [testing, setTesting] = useState(false);
@@ -613,7 +613,7 @@ function AiConfig() {
 
   useEffect(() => {
     api.get("/config").then((r) => {
-      setConfig({ aiUrl: r.data.aiUrl ?? "", aiModel: r.data.aiModel ?? "", aiLanguage: r.data.aiLanguage ?? "" });
+      setConfig({ aiUrl: r.data.aiUrl ?? "", aiModel: r.data.aiModel ?? "", aiVisionModel: r.data.aiVisionModel ?? "", aiLanguage: r.data.aiLanguage ?? "" });
       setLoaded(true);
       check();
     });
@@ -623,7 +623,7 @@ function AiConfig() {
     e.preventDefault();
     setMsg(null);
     try {
-      await api.put("/config", { aiUrl: config.aiUrl, aiModel: config.aiModel, aiLanguage: config.aiLanguage });
+      await api.put("/config", { aiUrl: config.aiUrl, aiModel: config.aiModel, aiVisionModel: config.aiVisionModel, aiLanguage: config.aiLanguage });
       setMsg({ type: "success", text: "Saved" });
       check();
     } catch (err) {
@@ -671,6 +671,35 @@ function AiConfig() {
             />
           )}
         </Field>
+      </div>
+
+      <Field label="Vision model (for receipt photos)">
+        {status?.visionModels?.length > 0 ? (
+          <select
+            className="glass-input" style={inp}
+            value={config.aiVisionModel}
+            onChange={(e) => setConfig((c) => ({ ...c, aiVisionModel: e.target.value }))}
+          >
+            <option value="">None — PDFs only</option>
+            {status.visionModels.map((m) => <option key={m} value={m}>{m}</option>)}
+          </select>
+        ) : (
+          <input
+            className="glass-input" style={inp}
+            value={config.aiVisionModel}
+            onChange={(e) => setConfig((c) => ({ ...c, aiVisionModel: e.target.value }))}
+            placeholder="qwen3-vl"
+          />
+        )}
+      </Field>
+      <div style={{ fontSize: 12, color: "rgba(255,255,255,0.35)", lineHeight: 1.7, margin: "6px 0 16px" }}>
+        Only used to read photographed receipts. Keep it separate from the model above: a vision
+        model is a poor text extractor — it reasons until it runs out of budget on a long document,
+        where the ordinary model returns the right figures in a second. PDFs are read as text and
+        need no vision model at all.
+        {status?.ok && status.visionModels?.length === 0 && (
+          <span style={{ color: "#fbbf24" }}> None of your models can read images — pull one, e.g. <code>ollama pull qwen3-vl:8b</code>.</span>
+        )}
       </div>
 
       <Field label="Transaction language">

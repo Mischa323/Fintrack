@@ -32,6 +32,9 @@ async function getConfig() {
   return {
     url: normaliseUrl(settings.aiUrl),
     model: settings.aiModel || null,
+    // Images need their own model; the text model stays authoritative for
+    // everything else. Falls back to the text model only if none is set.
+    visionModel: settings.aiVisionModel || null,
     language: (settings.aiLanguage || "").trim() || null,
   };
 }
@@ -46,8 +49,12 @@ async function checkConnection() {
     const response = await fetch(`${url}/api/tags`, { signal: controller.signal });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const data = await response.json();
+    // Capabilities tell the UI which models can actually read an image
     const models = (data.models || []).map((m) => m.name);
-    return { ok: true, url, model, models };
+    const visionModels = (data.models || [])
+      .filter((m) => (m.capabilities || []).includes("vision"))
+      .map((m) => m.name);
+    return { ok: true, url, model, models, visionModels };
   } catch (err) {
     const reason = err.name === "AbortError" ? "timed out" : err.message;
     return {
@@ -55,6 +62,7 @@ async function checkConnection() {
       url,
       model,
       models: [],
+      visionModels: [],
       error: `Could not reach Ollama at ${url} (${reason}). From a container, localhost is the container itself — use host.docker.internal or the host's LAN address.`,
     };
   } finally {

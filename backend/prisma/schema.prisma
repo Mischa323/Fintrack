@@ -178,6 +178,8 @@ model Settings {
   // Local Ollama used to suggest categories and clean up descriptions
   aiUrl              String?
   aiModel            String?
+  // Separate model for reading images; text tasks stay on aiModel
+  aiVisionModel      String?
   // Language hint for transaction labelling; empty = treat as multilingual
   aiLanguage         String?
   // How imports handle transfers between two known accounts: off | auto | confirm

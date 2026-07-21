@@ -18,21 +18,24 @@ const MATCH_WINDOW_DAYS = 5;
 // Receipts and bank charges can differ by a rounding cent, or by a tip.
 const AMOUNT_TOLERANCE = 0.02;
 
-function buildPrompt(language) {
+function buildPrompt(language, fromText) {
   const langHint = language
     ? `The document is most likely in ${language}, but may be in another language.`
     : "The document may be in any language.";
   return [
-    "You are reading a photo of a financial document: a shop receipt, an invoice,",
-    "or a payslip.",
+    fromText
+      ? "You are reading the text of a financial document: a shop receipt, an invoice, or a payslip."
+      : "You are reading a photo of a financial document: a shop receipt, an invoice, or a payslip.",
     langHint,
     "",
     "Extract exactly these fields:",
     "- merchant: the shop, company or employer name. Just the name, no address.",
     "- date: the document date as YYYY-MM-DD. Use the purchase/issue date.",
     "- amount: the TOTAL amount as a plain number, no currency symbol, dot as",
-    "  decimal separator. For a receipt this is the total paid, not a subtotal or",
-    "  a single line item. For a payslip use the net amount paid out.",
+    "  decimal separator. For a receipt or invoice this is the final total paid,",
+    "  after any discount — not a subtotal, a VAT line or a single item. For a",
+    "  payslip use the net amount actually paid out (netto te ontvangen), not the",
+    "  gross salary and not a cumulative year-to-date figure.",
     "- currency: the three-letter code, e.g. EUR.",
     "- kind: one of RECEIPT, INVOICE, PAYSLIP.",
     "- summary: one short line describing what was bought or paid.",
@@ -125,10 +128,29 @@ function extractJson(text) {
   return null;
 }
 
-// Sends the image to the model and returns the fields it could read.
-async function extractFromImage(base64Image) {
-  const { url, model, language } = await getConfig();
+// Sends a request to the model and turns its reply into the fields we need.
+// `images` is empty for a text-based PDF, which needs no vision model at all.
+async function askModel({ prompt, images }) {
+  const config = await getConfig();
+  const { url } = config;
+  const isImage = !!(images && images.length);
+
+  // Images go to the vision model; text goes to the ordinary one. They are kept
+  // apart because a vision model is a poor text extractor: qwen3-vl reasons
+  // until it exhausts its token budget on a payslip and answers nothing, where
+  // a plain text model returns the right figures in seconds.
+  const model = isImage ? config.visionModel || config.model : config.model;
   if (!model) throw new Error("No model configured — set one in Settings first");
+  if (isImage && !config.visionModel) {
+    // Better to say so up front than to fail deep inside Ollama
+    throw new Error(
+      "No vision model is configured. Set one under Settings → Local AI to read photos; PDFs are read as text and work without one."
+    );
+  }
+
+  // format:"json" makes a vision model return an empty response, but it is what
+  // keeps the text model reliable, so it is applied only on the text path.
+  const constrainOutput = !isImage;
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), VISION_TIMEOUT_MS);
@@ -140,32 +162,32 @@ async function extractFromImage(base64Image) {
       signal: controller.signal,
       body: JSON.stringify({
         model,
-        prompt: buildPrompt(language),
-        images: [base64Image],
+        prompt,
+        ...(isImage ? { images } : {}),
+        ...(constrainOutput ? { format: "json" } : {}),
         stream: false,
-        // No `format` here on purpose: constraining the output silently returns
-        // an empty response from vision models like qwen3-vl. The JSON is asked
-        // for in the prompt and picked out of the reply instead.
+        // Ollama 0.32 ignores this for qwen3-vl, which reasons regardless; kept
+        // because a model that does honour it answers far faster.
         think: false,
-        // Thinking models spend this budget reasoning before answering, and the
-        // answer is dropped if nothing is left, so it is deliberately generous.
-        options: { temperature: 0, num_predict: 2500 },
+        // A thinking model spends this budget reasoning before it answers and
+        // the answer is lost if nothing is left, so the image path gets more.
+        options: { temperature: 0, num_predict: isImage ? 2500 : 900 },
       }),
     });
     if (!response.ok) {
       const body = await response.text().catch(() => "");
       // A text-only model rejects the images field, which is the most likely
       // failure here and deserves a comprehensible message.
-      if (/does not support|image/i.test(body)) {
+      if (images && images.length && /does not support|image|vision/i.test(body)) {
         throw new Error(
-          `The model "${model}" cannot read images. Pick a vision model in Settings — for example qwen3-vl.`
+          `The model "${model}" cannot read images. Pick a vision model in Settings — for example qwen3-vl — or upload a PDF, which is read as text and needs no vision model.`
         );
       }
       throw new Error(`Ollama returned HTTP ${response.status}`);
     }
     data = await response.json();
   } catch (err) {
-    if (err.name === "AbortError") throw new Error("The model took too long to read the image");
+    if (err.name === "AbortError") throw new Error("The model took too long to read the document");
     throw err;
   } finally {
     clearTimeout(timer);
@@ -195,6 +217,52 @@ async function extractFromImage(base64Image) {
       return s ? String(s).trim().slice(0, 300) : null;
     })(),
   };
+}
+
+async function extractFromImage(base64Image) {
+  const { language } = await getConfig();
+  return askModel({ prompt: buildPrompt(language, false), images: [base64Image] });
+}
+
+// A PDF invoice or payslip carries real text, so it is read directly instead of
+// being rasterised and OCR'd — faster, more accurate, and it works with a
+// text-only model.
+async function extractFromPdf(buffer) {
+  const { PDFParse } = require("pdf-parse");
+  let text = "";
+  const parser = new PDFParse({ data: buffer });
+  try {
+    const result = await parser.getText();
+    text = (result.text || "").trim();
+  } catch (err) {
+    throw new Error(`Could not read the PDF: ${err.message}`);
+  } finally {
+    try { await parser.destroy(); } catch {}
+  }
+
+  // A scanned PDF is just an image in a wrapper and yields nothing useful here.
+  if (text.length < 40) {
+    throw new Error(
+      "This PDF holds no readable text — it is probably a scan. Upload a photo or screenshot of it instead, and use a vision model."
+    );
+  }
+
+  const { language } = await getConfig();
+  const prompt = [
+    buildPrompt(language, true),
+    "",
+    "Document text:",
+    // Trimmed: the tail of a long invoice is terms and conditions, and a large
+    // prompt slows a local model down considerably.
+    text.slice(0, 6000),
+  ].join("\n");
+  return askModel({ prompt });
+}
+
+// Routes a file to the right reader based on what it actually is.
+async function extractFromFile(buffer, mimeType) {
+  if (mimeType === "application/pdf") return extractFromPdf(buffer);
+  return extractFromImage(buffer.toString("base64"));
 }
 
 function scoreMatch(receipt, transaction) {
@@ -259,4 +327,4 @@ async function findMatches(extracted, limit = 5) {
     }));
 }
 
-module.exports = { extractFromImage, findMatches, MATCH_WINDOW_DAYS };
+module.exports = { extractFromImage, extractFromPdf, extractFromFile, findMatches, MATCH_WINDOW_DAYS };
