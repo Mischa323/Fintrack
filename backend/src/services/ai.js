@@ -1,4 +1,5 @@
 const { PrismaClient } = require("@prisma/client");
+const { generateJson, unwrap } = require("./ollama");
 
 const prisma = new PrismaClient();
 
@@ -110,43 +111,6 @@ function buildPrompt(rows, categories, language) {
   ].join("\n");
 }
 
-async function askModel(url, model, prompt) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
-  try {
-    const response = await fetch(`${url}/api/generate`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      signal: controller.signal,
-      body: JSON.stringify({
-        model,
-        prompt,
-        stream: false,
-        format: "json",
-        options: { temperature: 0, num_predict: 2000 },
-      }),
-    });
-    if (!response.ok) throw new Error(`Ollama returned HTTP ${response.status}`);
-    const data = await response.json();
-    // Asking for a wrapped array is what makes small models return every row
-    // instead of stopping after the first object. The wrapper key differs per
-    // prompt, so unwrapping is left to the caller.
-    return JSON.parse(data.response);
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
-// Small models sometimes answer with a bare array, sometimes with the wrapper
-// they were asked for, and occasionally with a differently named wrapper.
-function unwrap(parsed, key) {
-  if (Array.isArray(parsed)) return parsed;
-  if (!parsed || typeof parsed !== "object") return [];
-  if (Array.isArray(parsed[key])) return parsed[key];
-  const firstArray = Object.values(parsed).find((v) => Array.isArray(v));
-  return firstArray || [];
-}
-
 // Returns one suggestion per transaction that the model answered for. Anything
 // it skipped or answered nonsensically is simply left out rather than guessed.
 async function suggestForTransactions(transactionIds) {
@@ -165,6 +129,7 @@ async function suggestForTransactions(transactionIds) {
 
   const suggestions = [];
   let failed = 0;
+  let failureReason = null;
 
   for (let start = 0; start < transactions.length; start += BATCH_SIZE) {
     const batch = transactions.slice(start, start + BATCH_SIZE);
@@ -177,9 +142,16 @@ async function suggestForTransactions(transactionIds) {
 
     let answers;
     try {
-      answers = unwrap(await askModel(url, model, buildPrompt(rows, names, language)), "results");
-    } catch {
+      answers = unwrap(
+        await generateJson({ url, model, prompt: buildPrompt(rows, names, language), numPredict: 2000 }),
+        "results"
+      );
+    } catch (err) {
+      // Keep the reason rather than counting a silent failure: with the wrong
+      // kind of model every batch fails identically, and the user needs to be
+      // told that instead of seeing "0 suggestions".
       failed += batch.length;
+      if (!failureReason) failureReason = err.message;
       continue;
     }
 
@@ -203,7 +175,7 @@ async function suggestForTransactions(transactionIds) {
     failed += batch.length - answers.filter((a) => batch[Number(a.i) - 1]).length;
   }
 
-  return { suggestions, failed, model };
+  return { suggestions, failed, model, failureReason };
 }
 
 // Proposes which categories cover the same ground and could be folded together.
@@ -251,7 +223,7 @@ async function suggestCategoryMerges() {
     'Answer: {"groups":[{"keep":"<broad name from list>","merge":["<specific name from list>"],"why":"<short reason>"}]}',
   ].join("\n");
 
-  const raw = unwrap(await askModel(url, model, prompt), "groups");
+  const raw = unwrap(await generateJson({ url, model, prompt, numPredict: 1500 }), "groups");
 
   const groups = [];
   const used = new Set();

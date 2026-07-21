@@ -1,5 +1,6 @@
 const { PrismaClient } = require("@prisma/client");
 const { getConfig } = require("./ai");
+const { generateJson, pick } = require("./ollama");
 
 const prisma = new PrismaClient();
 
@@ -10,7 +11,6 @@ const prisma = new PrismaClient();
 // A vision model misreads amounts often enough — a smudged 8 becomes a 3 — that
 // silently creating money entries from a photo would be reckless.
 
-const VISION_TIMEOUT_MS = 180000;
 
 // How far apart a receipt and its transaction may sit. A card payment usually
 // books same-day, but a weekend or a pending charge pushes it out a few days.
@@ -95,133 +95,44 @@ function parseDate(value) {
   return parsed;
 }
 
-// Field names drift between runs — amount comes back as total_amount or total —
-// so each value is looked up under the names the model actually uses.
-function pick(obj, ...names) {
-  for (const name of names) {
-    if (obj[name] !== undefined && obj[name] !== null && obj[name] !== "") return obj[name];
-  }
-  return null;
-}
-
-// The model is a thinking model: it emits reasoning before the answer, so the
-// JSON has to be found inside free text rather than assumed to be the whole
-// response.
-function extractJson(text) {
-  if (!text) return null;
-  const start = text.indexOf("{");
-  if (start === -1) return null;
-  let depth = 0;
-  for (let i = start; i < text.length; i++) {
-    if (text[i] === "{") depth++;
-    else if (text[i] === "}") {
-      depth--;
-      if (depth === 0) {
-        try {
-          return JSON.parse(text.slice(start, i + 1));
-        } catch {
-          return null;
-        }
-      }
-    }
-  }
-  return null;
-}
-
-// Sends a request to the model and turns its reply into the fields we need.
-// `images` is empty for a text-based PDF, which needs no vision model at all.
-async function askModel({ prompt, images }) {
-  const config = await getConfig();
-  const { url } = config;
-  const isImage = !!(images && images.length);
-
-  // Images go to the vision model; text goes to the ordinary one. They are kept
-  // apart because a vision model is a poor text extractor: qwen3-vl reasons
-  // until it exhausts its token budget on a payslip and answers nothing, where
-  // a plain text model returns the right figures in seconds.
-  const model = isImage ? config.visionModel || config.model : config.model;
-  if (!model) throw new Error("No model configured — set one in Settings first");
-  if (isImage && !config.visionModel) {
-    // Better to say so up front than to fail deep inside Ollama
-    throw new Error(
-      "No vision model is configured. Set one under Settings → Local AI to read photos; PDFs are read as text and work without one."
-    );
-  }
-
-  // format:"json" makes a vision model return an empty response, but it is what
-  // keeps the text model reliable, so it is applied only on the text path.
-  const constrainOutput = !isImage;
-
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), VISION_TIMEOUT_MS);
-  let data;
-  try {
-    const response = await fetch(`${url}/api/generate`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      signal: controller.signal,
-      body: JSON.stringify({
-        model,
-        prompt,
-        ...(isImage ? { images } : {}),
-        ...(constrainOutput ? { format: "json" } : {}),
-        stream: false,
-        // Ollama 0.32 ignores this for qwen3-vl, which reasons regardless; kept
-        // because a model that does honour it answers far faster.
-        think: false,
-        // A thinking model spends this budget reasoning before it answers and
-        // the answer is lost if nothing is left, so the image path gets more.
-        options: { temperature: 0, num_predict: isImage ? 2500 : 900 },
-      }),
-    });
-    if (!response.ok) {
-      const body = await response.text().catch(() => "");
-      // A text-only model rejects the images field, which is the most likely
-      // failure here and deserves a comprehensible message.
-      if (images && images.length && /does not support|image|vision/i.test(body)) {
-        throw new Error(
-          `The model "${model}" cannot read images. Pick a vision model in Settings — for example qwen3-vl — or upload a PDF, which is read as text and needs no vision model.`
-        );
-      }
-      throw new Error(`Ollama returned HTTP ${response.status}`);
-    }
-    data = await response.json();
-  } catch (err) {
-    if (err.name === "AbortError") throw new Error("The model took too long to read the document");
-    throw err;
-  } finally {
-    clearTimeout(timer);
-  }
-
-  const parsed = extractJson(data.response) || extractJson(data.thinking);
-  if (!parsed) {
-    throw new Error(
-      "The model did not return readable data for this image. A sharper or straighter photo usually helps."
-    );
-  }
-
+// Turns whatever JSON the model produced into the fields a receipt needs.
+// Names and formats vary per model and per run, so each is looked up under
+// several keys and parsed leniently.
+function toReceiptFields(parsed) {
   const merchant = pick(parsed, "merchant", "shop", "store", "company", "employer");
   const kind = String(pick(parsed, "kind", "type") || "").toUpperCase();
+  const currency = pick(parsed, "currency", "valuta");
+  const summary = pick(parsed, "summary", "description");
 
   return {
     merchant: merchant ? String(merchant).trim().slice(0, 200) : null,
     date: parseDate(pick(parsed, "date", "document_date", "purchase_date", "datum")),
     amount: parseAmount(pick(parsed, "amount", "total_amount", "total", "totaal", "grand_total")),
-    currency: (() => {
-      const c = pick(parsed, "currency", "valuta");
-      return c ? String(c).trim().toUpperCase().slice(0, 3) : null;
-    })(),
+    currency: currency ? String(currency).trim().toUpperCase().slice(0, 3) : null,
     kind: ["RECEIPT", "INVOICE", "PAYSLIP"].includes(kind) ? kind : "UNKNOWN",
-    summary: (() => {
-      const s = pick(parsed, "summary", "description");
-      return s ? String(s).trim().slice(0, 300) : null;
-    })(),
+    summary: summary ? String(summary).trim().slice(0, 300) : null,
   };
 }
 
 async function extractFromImage(base64Image) {
-  const { language } = await getConfig();
-  return askModel({ prompt: buildPrompt(language, false), images: [base64Image] });
+  const config = await getConfig();
+  if (!config.visionModel) {
+    throw new Error(
+      "No vision model is configured. Set one under Settings → Local AI to read photos; PDFs are read as text and work without one."
+    );
+  }
+  const parsed = await generateJson({
+    url: config.url,
+    model: config.visionModel,
+    prompt: buildPrompt(config.language, false),
+    images: [base64Image],
+    // Constraining the output empties the reply on some vision models
+    constrain: false,
+    // A thinking model reasons before answering and loses the answer if the
+    // budget runs out, so the image path is given room.
+    numPredict: 2500,
+  });
+  return toReceiptFields(parsed);
 }
 
 // A PDF invoice or payslip carries real text, so it is read directly instead of
@@ -247,16 +158,21 @@ async function extractFromPdf(buffer) {
     );
   }
 
-  const { language } = await getConfig();
-  const prompt = [
-    buildPrompt(language, true),
-    "",
-    "Document text:",
-    // Trimmed: the tail of a long invoice is terms and conditions, and a large
-    // prompt slows a local model down considerably.
-    text.slice(0, 6000),
-  ].join("\n");
-  return askModel({ prompt });
+  const config = await getConfig();
+  const parsed = await generateJson({
+    url: config.url,
+    model: config.model,
+    prompt: [
+      buildPrompt(config.language, true),
+      "",
+      "Document text:",
+      // Trimmed: the tail of a long invoice is terms and conditions, and a large
+      // prompt slows a local model down considerably.
+      text.slice(0, 6000),
+    ].join("\n"),
+    numPredict: 900,
+  });
+  return toReceiptFields(parsed);
 }
 
 // Routes a file to the right reader based on what it actually is.

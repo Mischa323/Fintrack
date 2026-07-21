@@ -88,7 +88,7 @@ To actually get Watchtower auto-updates, images must be published (GitHub Action
 
 `backend/package.json` `version` is the **single source of truth** — bump it on
 every meaningful change (keep `frontend/package.json` in sync for tidiness).
-Currently **1.18.0**.
+Currently **1.18.1**.
 
 - `GET /version` → `{ version, buildTime }` (authenticated)
 - `GET /version/check` → compares against the `version` in `backend/package.json`
@@ -155,6 +155,29 @@ floors, so `EXTRA_COLORS` and the free colour picker are offered as "harder to
 tell apart" — the chart leans on labels and tooltips there, not hue. Re-validate
 with `dataviz/scripts/validate_palette.js` against surface `#12263a` before
 changing these.
+
+## Talking to Ollama (services/ollama.js)
+
+FinTrack is self-hosted, so **it cannot assume which model is configured**. One
+shared `generateJson()` absorbs the differences; features never call Ollama
+directly.
+
+What it handles, each found by testing rather than guessed:
+- A **thinking model leaves `response` empty** and puts the answer in
+  `thinking`. `JSON.parse(response)` then threw and a whole batch was counted as
+  a silent failure — measured: 0 of 12 transactions labelled. Both fields are now
+  searched, and JSON is brace-matched out of surrounding prose.
+- **Truncation**: reasoning eats `num_predict` and the answer is lost
+  (`done_reason: "length"`). Retried once with triple the budget.
+- **`format:"json"` cuts both ways**: it keeps text models reliable but empties
+  the reply of some vision models. Callers choose via `constrain`, and the retry
+  flips it if the first attempt came back empty.
+- Failures **name their cause** ("spent the whole budget reasoning") instead of
+  reporting nothing, and `suggestForTransactions` returns `failureReason`.
+
+Verified across three configurations — normal, a thinking model used for
+everything, and no vision model at all — labelling, PDF and photo each either
+work or fail with a message that says what to change.
 
 ## Local AI (Ollama)
 
