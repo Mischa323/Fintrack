@@ -114,10 +114,35 @@ model Transaction {
   // Counterparty IBAN from imported statements; used to detect transfers
   // between two accounts that both exist in FinTrack.
   counterpartyIban String?
+  receipts     Receipt[]
   createdAt    DateTime              @default(now())
   updatedAt    DateTime              @updatedAt
 
   @@unique([externalId, accountId])
+}
+
+model Receipt {
+  id         String    @id @default(cuid())
+  filename   String
+  storedName String
+  mimeType   String
+  size       Int
+  // What the vision model read off the image; optional, a poor photo may only
+  // yield some of it.
+  merchant   String?
+  date       DateTime?
+  amount     Decimal?
+  currency   String?
+  kind       String? // RECEIPT | INVOICE | PAYSLIP | UNKNOWN
+  rawText    String?
+  transactionId String?
+  transaction   Transaction? @relation(fields: [transactionId], references: [id], onDelete: SetNull)
+  status     String    @default("PENDING") // PENDING | MATCHED | CREATED | UNMATCHED
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  @@index([transactionId])
+  @@index([status])
 }
 
 model User {

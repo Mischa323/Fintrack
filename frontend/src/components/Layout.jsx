@@ -8,6 +8,7 @@ const NAV = [
   { to: "/goals", icon: "◎", label: "Goals" },
   { to: "/categories", icon: "⊞", label: "Categories" },
   { to: "/recurring", icon: "⟳", label: "Recurring" },
+  { to: "/receipts", icon: "🧾", label: "Receipts" },
   { to: "/import", icon: "⇪", label: "Import" },
 ];
 

@@ -1,5 +1,7 @@
 import axios from "axios";
 
+const API_BASE = import.meta.env.VITE_API_URL || "/api";
+
 const api = axios.create({
   baseURL: import.meta.env.VITE_API_URL || "/api",
 });
@@ -108,6 +110,25 @@ export const importApi = {
     form.append("file", file);
     return api.post("/import/maybe-accounts", form).then((r) => r.data);
   },
+};
+
+export const receipts = {
+  list: (status) => api.get("/receipts", { params: { status } }).then((r) => r.data),
+  upload: (file) => {
+    const form = new FormData();
+    form.append("file", file);
+    return api.post("/receipts", form).then((r) => r.data);
+  },
+  // Fetched as a blob rather than used as an <img src>: every route sits behind
+  // JWT auth, and an img tag cannot send the Authorization header.
+  image: (id) =>
+    api.get("/receipts/" + id + "/image", { responseType: "blob" }).then((r) => URL.createObjectURL(r.data)),
+  link: (id, transactionId) => api.post("/receipts/" + id + "/link", { transactionId }).then((r) => r.data),
+  unlink: (id) => api.post("/receipts/" + id + "/unlink").then((r) => r.data),
+  rematch: (id) => api.post("/receipts/" + id + "/rematch").then((r) => r.data),
+  dismiss: (id) => api.post("/receipts/" + id + "/dismiss").then((r) => r.data),
+  createTransaction: (id, data) => api.post("/receipts/" + id + "/create-transaction", data).then((r) => r.data),
+  remove: (id) => api.delete("/receipts/" + id),
 };
 
 export const holdings = {
