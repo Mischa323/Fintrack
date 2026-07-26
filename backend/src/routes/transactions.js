@@ -44,17 +44,19 @@ router.get("/", async (req, res) => {
   // balance. It is not a transaction — it stays out of income/expense — so it is
   // returned separately for the UI to pin, not mixed into the rows.
   let openingBalance = null;
+  let openingBalanceDate = null;
   if (accountId) {
     const account = await prisma.account.findUnique({
       where: { id: accountId },
-      select: { openingBalance: true },
+      select: { openingBalance: true, openingBalanceDate: true },
     });
     if (account && Number(account.openingBalance) !== 0) {
       openingBalance = Number(account.openingBalance);
+      openingBalanceDate = account.openingBalanceDate;
     }
   }
 
-  res.json({ transactions, total, page: Number(page), limit: Number(limit), openingBalance });
+  res.json({ transactions, total, page: Number(page), limit: Number(limit), openingBalance, openingBalanceDate });
 });
 
 // Net balance correction per account, so a bulk action touches each account

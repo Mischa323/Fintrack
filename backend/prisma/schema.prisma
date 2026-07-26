@@ -19,6 +19,9 @@ model Account {
   // Balance before the first recorded transaction. Imported history is never
   // complete, so the derived balance is openingBalance + sum(transactions).
   openingBalance Decimal              @default(0)
+  // Date the opening balance is true as of; transactions on/before it are baked
+  // into it, only later ones move the balance. Null = count every transaction.
+  openingBalanceDate DateTime?
   color        String                 @default("#6366f1")
   icon         String?
   institution  String?

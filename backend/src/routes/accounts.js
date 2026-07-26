@@ -40,7 +40,8 @@ router.post("/:id/recalculate", async (req, res) => {
   const balance = await recalculateBalance(req.params.id);
   if (balance === null) return res.status(404).json({ error: "Account not found" });
   const account = await prisma.account.findUnique({ where: { id: req.params.id } });
-  const movements = await sumTransactions(req.params.id);
+  // Movements that count toward the balance are only those after the checkpoint
+  const movements = await sumTransactions(req.params.id, account.openingBalanceDate || null);
   res.json({ ...account, balance, movements });
 });
 

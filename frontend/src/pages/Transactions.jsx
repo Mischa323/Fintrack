@@ -491,14 +491,23 @@ export default function Transactions() {
             {data.transactions.length === 0 && (
               <tr><td colSpan={8} style={{ padding: "60px 16px", textAlign: "center", color: "rgba(255,255,255,0.25)", fontSize: 14 }}>No transactions found</td></tr>
             )}
-            {/* Opening balance — the amount set via "Set balance", shown as the
-                oldest entry when viewing one account's last page. */}
+            {/* Opening balance set via "Set balance". With a checkpoint date it
+                is a dated anchor (transactions before it are already included);
+                without one it is the legacy pre-history opening amount. Shown as
+                the oldest entry when viewing one account's last page. */}
             {data.openingBalance != null && filters.accountId && filters.page * 50 >= data.total && (
-              <tr style={{ borderTop: "1px solid rgba(255,255,255,0.1)", background: "rgba(255,255,255,0.02)" }}>
+              <tr style={{ borderTop: "1px solid rgba(255,255,255,0.1)", background: "rgba(129,140,248,0.06)" }}>
                 <td style={{ padding: "12px 16px" }} />
-                <td style={{ padding: "12px 16px", fontSize: 13, color: "rgba(255,255,255,0.4)", whiteSpace: "nowrap" }}>—</td>
-                <td style={{ padding: "12px 16px", fontSize: 14, fontStyle: "italic", color: "rgba(255,255,255,0.55)" }} colSpan={4}>
-                  Opening balance <span style={{ color: "rgba(255,255,255,0.3)" }}>· before recorded history</span>
+                <td style={{ padding: "12px 16px", fontSize: 13, color: "rgba(255,255,255,0.5)", whiteSpace: "nowrap" }}>
+                  {data.openingBalanceDate ? format(new Date(data.openingBalanceDate), "dd MMM yyyy") : "—"}
+                </td>
+                <td style={{ padding: "12px 16px", fontSize: 14, color: "#c7d2fe" }} colSpan={4}>
+                  {data.openingBalanceDate ? "Balance set" : "Opening balance"}
+                  <span style={{ color: "rgba(255,255,255,0.35)" }}>
+                    {data.openingBalanceDate
+                      ? " · earlier transactions are already included in this"
+                      : " · before recorded history"}
+                  </span>
                 </td>
                 <td style={{ padding: "12px 16px", textAlign: "right", fontWeight: 700, fontSize: 15 }} className={data.openingBalance >= 0 ? "amount-income" : "amount-expense"}>
                   {data.openingBalance >= 0 ? "+" : "-"}{fmt(Math.abs(data.openingBalance))}
