@@ -12,9 +12,12 @@ const prisma = new PrismaClient();
 // silently creating money entries from a photo would be reckless.
 
 
-// How far apart a receipt and its transaction may sit. A card payment usually
-// books same-day, but a weekend or a pending charge pushes it out a few days.
-const MATCH_WINDOW_DAYS = 5;
+// How far apart a receipt and its transaction may sit. A card payment books
+// same-day, but an invoice date is not the payment date — an online order is
+// billed on the invoice date and charged a few days either side — so the window
+// is generous. Distance still costs score, so a far match is only a candidate,
+// never auto-linked.
+const MATCH_WINDOW_DAYS = 10;
 // Receipts and bank charges can differ by a rounding cent, or by a tip.
 const AMOUNT_TOLERANCE = 0.02;
 
@@ -194,7 +197,8 @@ function scoreMatch(receipt, transaction) {
 
   if (dayDiff <= 0.5) score += 30;
   else if (dayDiff <= 2) score += 20;
-  else if (dayDiff <= MATCH_WINDOW_DAYS) score += 10;
+  else if (dayDiff <= 5) score += 10;
+  else if (dayDiff <= MATCH_WINDOW_DAYS) score += 5;
 
   if (receipt.merchant) {
     const merchant = receipt.merchant.toLowerCase();

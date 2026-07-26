@@ -89,6 +89,35 @@ router.post("/", upload.single("file"), async (req, res) => {
   res.status(201).json({ receipt, extracted, matches });
 });
 
+// GET /receipts/search-transactions?q= — find a transaction to link by hand when
+// the automatic match missed. Searches description and amount across all dates,
+// since the user knows which one it is. Declared before "/:id" routes.
+router.get("/search-transactions", async (req, res) => {
+  const q = String(req.query.q || "").trim();
+  if (q.length < 2) return res.json([]);
+
+  const or = [{ description: { contains: q } }];
+  // "229" or "229,00" also searches by amount, which a bank description may not contain
+  const asNumber = Number(q.replace(",", "."));
+  if (Number.isFinite(asNumber) && asNumber > 0) or.push({ amount: asNumber });
+
+  const rows = await prisma.transaction.findMany({
+    where: { OR: or },
+    include: { account: { select: { id: true, name: true } }, category: true },
+    orderBy: { date: "desc" },
+    take: 15,
+  });
+  res.json(rows.map((t) => ({
+    id: t.id,
+    description: t.description,
+    amount: Number(t.amount),
+    date: t.date,
+    type: t.type,
+    account: t.account,
+    category: t.category,
+  })));
+});
+
 // POST /receipts/auto-link — link every pending receipt whose best candidate is
 // a strong match, and report the rest so they can still be reviewed by hand.
 // Declared before "/:id" routes so the literal path wins.

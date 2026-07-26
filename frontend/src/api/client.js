@@ -129,6 +129,7 @@ export const receipts = {
   dismiss: (id) => api.post("/receipts/" + id + "/dismiss").then((r) => r.data),
   createTransaction: (id, data) => api.post("/receipts/" + id + "/create-transaction", data).then((r) => r.data),
   autoLink: () => api.post("/receipts/auto-link").then((r) => r.data),
+  searchTransactions: (q) => api.get("/receipts/search-transactions", { params: { q } }).then((r) => r.data),
   remove: (id) => api.delete("/receipts/" + id),
 };
 

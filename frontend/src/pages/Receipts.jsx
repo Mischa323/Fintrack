@@ -19,6 +19,9 @@ function ReviewModal({ receipt, matches: initialMatches, accounts, categories, o
   const [error, setError] = useState(null);
   const [creating, setCreating] = useState(false);
   const [imageUrl, setImageUrl] = useState(null);
+  const [query, setQuery] = useState("");
+  const [searchResults, setSearchResults] = useState([]);
+  const [searching, setSearching] = useState(false);
 
   // The object URL is revoked on close so the blob is not held for the session
   useEffect(() => {
@@ -26,6 +29,22 @@ function ReviewModal({ receipt, matches: initialMatches, accounts, categories, o
     receiptsApi.image(receipt.id).then((u) => { url = u; setImageUrl(u); }).catch(() => {});
     return () => { if (url) URL.revokeObjectURL(url); };
   }, [receipt.id]);
+
+  // Debounced manual search; pre-seeded with the merchant so the common case is
+  // one glance away.
+  useEffect(() => { if (matches.length === 0 && receipt.merchant) setQuery(receipt.merchant); }, []);
+  useEffect(() => {
+    const q = query.trim();
+    if (q.length < 2) { setSearchResults([]); return; }
+    setSearching(true);
+    const timer = setTimeout(() => {
+      receiptsApi.searchTransactions(q)
+        .then(setSearchResults)
+        .catch(() => setSearchResults([]))
+        .finally(() => setSearching(false));
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [query]);
   const [form, setForm] = useState({
     accountId: accounts[0]?.id || "",
     categoryId: "",
@@ -128,6 +147,42 @@ function ReviewModal({ receipt, matches: initialMatches, accounts, categories, o
                       </button>
                     </div>
                   ))}
+                </div>
+
+                {/* Manual search — for when the automatic match missed, so an
+                    existing transaction can still be linked instead of creating
+                    a duplicate. */}
+                <div style={{ marginTop: 16, paddingTop: 14, borderTop: "1px solid rgba(255,255,255,0.06)" }}>
+                  <div style={{ fontSize: 12, color: "rgba(255,255,255,0.45)", marginBottom: 6 }}>
+                    Not here? Search for the transaction by name or amount
+                  </div>
+                  <input
+                    className="glass-input"
+                    style={{ padding: "8px 12px", width: "100%", fontSize: 13 }}
+                    placeholder="e.g. Media Markt or 229"
+                    value={query}
+                    onChange={(e) => setQuery(e.target.value)}
+                  />
+                  {searching && <div style={{ fontSize: 12, color: "rgba(255,255,255,0.35)", marginTop: 6 }}>Searching…</div>}
+                  <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 8 }}>
+                    {searchResults.map((m) => (
+                      <div key={m.id} style={{
+                        display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12,
+                        padding: "8px 12px", borderRadius: 9, background: "rgba(255,255,255,0.04)", fontSize: 13,
+                      }}>
+                        <div style={{ minWidth: 0 }}>
+                          <div style={{ fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.description}</div>
+                          <div style={{ color: "rgba(255,255,255,0.45)" }}>{fmt(m.amount)} · {fmtDate(m.date)} · {m.account?.name}</div>
+                        </div>
+                        <button className="glass-btn glass-btn-ghost" style={{ padding: "5px 12px", fontSize: 13, whiteSpace: "nowrap" }} onClick={() => link(m)} disabled={busy}>
+                          Link
+                        </button>
+                      </div>
+                    ))}
+                    {query.trim().length >= 2 && !searching && searchResults.length === 0 && (
+                      <div style={{ fontSize: 12, color: "rgba(255,255,255,0.3)" }}>Nothing found — it may not be imported yet.</div>
+                    )}
+                  </div>
                 </div>
               </>
             )}

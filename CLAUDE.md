@@ -88,7 +88,7 @@ To actually get Watchtower auto-updates, images must be published (GitHub Action
 
 `backend/package.json` `version` is the **single source of truth** — bump it on
 every meaningful change (keep `frontend/package.json` in sync for tidiness).
-Currently **1.18.2**.
+Currently **1.19.0**.
 
 - `GET /version` → `{ version, buildTime }` (authenticated)
 - `GET /version/check` → compares against the `version` in `backend/package.json`
@@ -234,14 +234,14 @@ Vision-model gotchas, all worked around (qwen3-vl on Ollama 0.32):
   day-first dates and comma decimals.
 
 Matching scores amount first (>0.5 apart is rejected outright), then date within
-±5 days, then a merchant-word hit; a payslip matches INCOME, everything else
+±10 days (an invoice date is not the payment date), then a merchant-word hit; a payslip matches INCOME, everything else
 EXPENSE. Only >=90 counts as strong.
 
 `POST /receipts/auto-link` links every pending document whose best candidate is
 strong **and** unambiguous (no runner-up scoring as high), leaving the rest for
 review — so a batch can be approved in one click without guessing. Nothing else
 is ever written automatically; the image is shown beside the values so a misread
-digit is caught before it becomes a transaction.
+digit is caught before it becomes a transaction. When the automatic match misses, a manual search (GET /receipts/search-transactions, by description or amount, all dates) links an existing transaction instead of creating a duplicate.
 
 ## Investments (holdings)
 
