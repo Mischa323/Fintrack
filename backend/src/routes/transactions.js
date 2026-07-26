@@ -155,6 +155,18 @@ router.patch("/bulk", async (req, res) => {
 router.post("/", async (req, res) => {
   const { accountId, toAccountId, categoryId, amount, description, date, type, notes } = req.body;
 
+  // An investment account's balance is the value of its holdings, so income and
+  // expense on it are meaningless. Only transfers (money in or out to buy and
+  // sell) and the buy/sell ledger belong there.
+  if (type !== "TRANSFER") {
+    const account = await prisma.account.findUnique({ where: { id: accountId }, select: { type: true } });
+    if (account?.type === "INVESTMENT") {
+      return res.status(400).json({
+        error: "An investment account only takes transfers to and from other accounts. Record buys and sells under Holdings.",
+      });
+    }
+  }
+
   const transaction = await prisma.$transaction(async (tx) => {
     const t = await tx.transaction.create({
       data: {

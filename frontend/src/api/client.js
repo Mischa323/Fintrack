@@ -147,6 +147,8 @@ export const holdings = {
   trades: (holdingId) => api.get(`/holdings/${holdingId}/trades`).then((r) => r.data),
   addTrade: (holdingId, data) => api.post(`/holdings/${holdingId}/trades`, data).then((r) => r.data),
   removeTrade: (holdingId, tradeId) => api.delete(`/holdings/${holdingId}/trades/${tradeId}`),
+  history: (accountId, range) => api.get("/holdings/history", { params: { accountId, range } }).then((r) => r.data),
+  alerts: () => api.get("/holdings/alerts").then((r) => r.data),
   importRevolut: (accountId, file) => {
     const form = new FormData();
     form.append("accountId", accountId);

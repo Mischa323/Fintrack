@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
+import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
 import { accounts as accountsApi , holdings as holdingsApi } from "../api/client";
 import GlassCard from "../components/GlassCard";
 
@@ -18,6 +19,124 @@ const emptyForm = { name: "", type: "CHECKING", currency: "EUR", balance: "", co
 
 const fieldStyle = { padding: "10px 14px", width: "100%", boxSizing: "border-box", display: "block", marginTop: 6 };
 const labelStyle = { fontSize: 12, color: "rgba(255,255,255,0.5)", fontWeight: 500, display: "block" };
+
+// ── Value of the account's holdings over time ────────────────────────────────
+// Reconstructed on the backend from the trade ledger and historical prices, so
+// the chart has history the moment a position exists — not only from now on.
+const RANGES = [
+  { value: "1mo", label: "1M" },
+  { value: "3mo", label: "3M" },
+  { value: "6mo", label: "6M" },
+  { value: "1y", label: "1Y" },
+  { value: "2y", label: "2Y" },
+  { value: "max", label: "Max" },
+];
+
+function ValueHistoryChart({ accountId, currency }) {
+  const [range, setRange] = useState("6mo");
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    let live = true;
+    setLoading(true);
+    setError(null);
+    holdingsApi
+      .history(accountId, range)
+      .then((r) => { if (live) { setData(r); setLoading(false); } })
+      .catch((e) => { if (live) { setError(e.response?.data?.error || e.message); setLoading(false); } });
+    return () => { live = false; };
+  }, [accountId, range]);
+
+  const money = (n) => new Intl.NumberFormat("nl-NL", { style: "currency", currency: currency || "EUR", maximumFractionDigits: 0 }).format(n);
+  const series = data?.series || [];
+  const first = series[0]?.value;
+  const last = series[series.length - 1]?.value;
+  const change = first != null && last != null ? last - first : null;
+  const changePct = change != null && first > 0 ? (change / first) * 100 : null;
+
+  // A month label, and the year too once the span crosses into another one.
+  const spanYears = series.length > 1 && series[0].date.slice(0, 4) !== series[series.length - 1].date.slice(0, 4);
+  const tickLabel = (d) => {
+    const date = new Date(d);
+    const m = date.toLocaleDateString("en-US", { month: "short" });
+    return spanYears ? `${m} '${String(date.getFullYear()).slice(2)}` : m;
+  };
+
+  const Tip = ({ active, payload, label }) => {
+    if (!active || !payload?.length) return null;
+    return (
+      <div className="glass" style={{ padding: "8px 12px", fontSize: 12 }}>
+        <div style={{ color: "#94a3b8", marginBottom: 2 }}>{new Date(label).toLocaleDateString("nl-NL")}</div>
+        <div style={{ color: "#34d399", fontWeight: 600 }}>{money(payload[0].value)}</div>
+      </div>
+    );
+  };
+
+  return (
+    <div style={{ marginTop: 16 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 12, flexWrap: "wrap" }}>
+        <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
+          <span style={{ fontSize: 13, fontWeight: 600 }}>Value over time</span>
+          {change != null && (
+            <span style={{ fontSize: 12, color: change >= 0 ? "#34d399" : "#f87171" }}>
+              {change >= 0 ? "+" : ""}{money(change)}{changePct != null ? ` (${changePct >= 0 ? "+" : ""}${changePct.toFixed(1)}%)` : ""} this period
+            </span>
+          )}
+        </div>
+        <div style={{ display: "flex", borderRadius: 8, overflow: "hidden", border: "1px solid rgba(255,255,255,0.1)" }}>
+          {RANGES.map((r) => (
+            <button
+              key={r.value}
+              type="button"
+              onClick={() => setRange(r.value)}
+              style={{
+                padding: "4px 10px", fontSize: 12, fontWeight: 600, border: "none", cursor: "pointer",
+                background: range === r.value ? "rgba(99,102,241,0.3)" : "transparent",
+                color: range === r.value ? "#c7d2fe" : "rgba(255,255,255,0.45)",
+              }}
+            >
+              {r.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div style={{ height: 180, marginTop: 10 }}>
+        {loading ? (
+          <div style={{ color: "rgba(255,255,255,0.35)", fontSize: 13, padding: "60px 0", textAlign: "center" }}>Loading…</div>
+        ) : error ? (
+          <div style={{ color: "#f87171", fontSize: 13, padding: "60px 0", textAlign: "center" }}>{error}</div>
+        ) : series.length < 2 ? (
+          <div style={{ color: "rgba(255,255,255,0.3)", fontSize: 13, padding: "60px 0", textAlign: "center" }}>
+            Not enough price history yet — it fills in as prices refresh.
+          </div>
+        ) : (
+          <ResponsiveContainer width="100%" height="100%">
+            <AreaChart data={series} margin={{ top: 4, right: 4, bottom: 0, left: 0 }}>
+              <defs>
+                <linearGradient id="valueFill" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor="#34d399" stopOpacity={0.35} />
+                  <stop offset="100%" stopColor="#34d399" stopOpacity={0} />
+                </linearGradient>
+              </defs>
+              <XAxis dataKey="date" tickFormatter={tickLabel} tick={{ fill: "#64748b", fontSize: 11 }} axisLine={false} tickLine={false} minTickGap={40} />
+              <YAxis tick={{ fill: "#64748b", fontSize: 11 }} axisLine={false} tickLine={false} width={52}
+                tickFormatter={(v) => (Math.abs(v) >= 1000 ? `${(v / 1000).toFixed(0)}k` : `${v}`)} domain={["auto", "auto"]} />
+              <Tooltip content={<Tip />} />
+              <Area type="monotone" dataKey="value" stroke="#34d399" strokeWidth={2} fill="url(#valueFill)" />
+            </AreaChart>
+          </ResponsiveContainer>
+        )}
+      </div>
+
+      {data?.errors?.length > 0 && (
+        <div style={{ fontSize: 11, color: "#fbbf24", marginTop: 4 }}>{data.errors[0]}</div>
+      )}
+    </div>
+  );
+}
 
 // ── Buy / sell history for one holding ───────────────────────────────────────
 function HoldingTradesModal({ holding, onClose, onChanged }) {
@@ -277,6 +396,28 @@ function HoldingsModal({ account, onClose, onChanged }) {
     done("Position removed");
   };
 
+  // Alert me when this position is down more than X% versus its average cost.
+  const setAlert = async (h) => {
+    const current = h.lossAlertPercent == null ? "" : String(Number(h.lossAlertPercent));
+    const entered = window.prompt(
+      `Alert when ${h.symbol} falls this many percent below its average cost.\n\n`
+        + "Leave empty to remove the alert.",
+      current
+    );
+    if (entered === null) return;
+    const trimmed = entered.trim().replace(",", ".");
+    if (trimmed !== "" && (isNaN(Number(trimmed)) || Number(trimmed) <= 0)) {
+      setMsg({ error: true, text: `"${entered}" is not a percentage above zero` });
+      return;
+    }
+    try {
+      await holdingsApi.update(h.id, { lossAlertPercent: trimmed === "" ? null : Number(trimmed) });
+      done(trimmed === "" ? `Alert removed for ${h.symbol}` : `Alert set: ${h.symbol} below −${Number(trimmed)}%`);
+    } catch (err) {
+      setMsg({ error: true, text: err.response?.data?.error || err.message });
+    }
+  };
+
   const total = rows.reduce(
     (sum, h) => sum + (h.lastPrice ? Number(h.quantity) * Number(h.lastPrice) : 0), 0
   );
@@ -301,6 +442,10 @@ function HoldingsModal({ account, onClose, onChanged }) {
           <div style={{ marginTop: 14, fontSize: 13, color: msg.error ? "#f87171" : "#34d399" }}>
             {msg.error ? "" : "✓ "}{msg.text}
           </div>
+        )}
+
+        {!loading && rows.length > 0 && (
+          <ValueHistoryChart accountId={account.id} currency={account.currency} />
         )}
 
         <div style={{ flex: 1, overflowY: "auto", marginTop: 16, minHeight: 100 }}>
@@ -343,8 +488,21 @@ function HoldingsModal({ account, onClose, onChanged }) {
                       </td>
                       <td style={{ padding: "9px 10px", textAlign: "right", color: gain == null ? "rgba(255,255,255,0.3)" : gain >= 0 ? "#34d399" : "#f87171" }}>
                         {gain == null ? "—" : `${gain >= 0 ? "+" : ""}${money(gain, h.currency)}${pct != null ? ` (${pct >= 0 ? "+" : ""}${pct.toFixed(1)}%)` : ""}`}
+                        {h.alertTriggered && (
+                          <div style={{ fontSize: 11, color: "#f87171", fontWeight: 600, marginTop: 2 }}>
+                            ⚠ past −{Number(h.lossAlertPercent)}% alert
+                          </div>
+                        )}
                       </td>
                       <td style={{ padding: "9px 10px", textAlign: "right", whiteSpace: "nowrap" }}>
+                        <button
+                          className="glass-btn glass-btn-ghost"
+                          style={{ padding: "3px 9px", fontSize: 12, marginRight: 5, color: h.alertTriggered ? "#f87171" : h.lossAlertPercent != null ? "#fbbf24" : undefined }}
+                          onClick={() => setAlert(h)}
+                          title={h.lossAlertPercent != null ? `Loss alert at −${Number(h.lossAlertPercent)}% — click to change` : "Set a loss alert"}
+                        >
+                          {h.lossAlertPercent != null ? "🔔" : "🔕"}
+                        </button>
                         <button className="glass-btn glass-btn-ghost" style={{ padding: "3px 9px", fontSize: 12, marginRight: 5 }} onClick={() => setTradesFor(h)} title="Buy, sell and history">⇄</button>
                         <button className="glass-btn glass-btn-danger" style={{ padding: "3px 9px", fontSize: 12 }} onClick={() => remove(h)}>×</button>
                       </td>
@@ -405,6 +563,14 @@ function HoldingsModal({ account, onClose, onChanged }) {
           <input ref={tradesRef} type="file" accept=".csv" style={{ display: "none" }} onChange={(e) => importTrades(e.target.files[0])} />
         </div>
       </div>
+
+      {tradesFor && (
+        <HoldingTradesModal
+          holding={tradesFor}
+          onClose={() => setTradesFor(null)}
+          onChanged={() => { load(); onChanged?.(); }}
+        />
+      )}
     </div>
   );
 }

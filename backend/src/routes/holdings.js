@@ -5,6 +5,7 @@ const fs = require("fs");
 const { parse } = require("csv-parse");
 const { PrismaClient } = require("@prisma/client");
 const { fetchQuote, refreshHoldings, recalculateAccountValue } = require("../services/quotes");
+const { accountValueHistory } = require("../services/valueHistory");
 
 const router = express.Router();
 const prisma = new PrismaClient();
@@ -66,6 +67,19 @@ async function ensureOpeningTrade(holding) {
   });
 }
 
+// Unrealised gain/loss versus average cost, and whether it tripped the alert.
+function withGain(holding) {
+  const price = holding.lastPrice == null ? null : Number(holding.lastPrice);
+  const avg = holding.avgCost == null ? null : Number(holding.avgCost);
+  let gainPercent = null;
+  if (price != null && avg != null && avg > 0) {
+    gainPercent = Math.round(((price - avg) / avg) * 1000) / 10;
+  }
+  const threshold = holding.lossAlertPercent == null ? null : Number(holding.lossAlertPercent);
+  const alertTriggered = threshold != null && gainPercent != null && gainPercent <= -threshold;
+  return { ...holding, gainPercent, alertTriggered };
+}
+
 // GET /holdings?accountId=
 router.get("/", async (req, res) => {
   const { accountId } = req.query;
@@ -74,7 +88,32 @@ router.get("/", async (req, res) => {
     orderBy: { symbol: "asc" },
     include: { account: { select: { id: true, name: true, currency: true } } },
   });
-  res.json(holdings);
+  res.json(holdings.map(withGain));
+});
+
+// GET /holdings/alerts — every position that has breached its loss alert, for a
+// badge/summary without loading each account's holdings.
+router.get("/alerts", async (req, res) => {
+  const holdings = await prisma.holding.findMany({
+    where: { lossAlertPercent: { not: null } },
+    include: { account: { select: { id: true, name: true } } },
+  });
+  const triggered = holdings.map(withGain).filter((h) => h.alertTriggered).map((h) => ({
+    id: h.id,
+    symbol: h.symbol,
+    name: h.name,
+    account: h.account,
+    gainPercent: h.gainPercent,
+    lossAlertPercent: Number(h.lossAlertPercent),
+  }));
+  res.json({ count: triggered.length, alerts: triggered });
+});
+
+// GET /holdings/history?accountId=&range= — the account's value over time
+router.get("/history", async (req, res) => {
+  const { accountId, range } = req.query;
+  if (!accountId) return res.status(400).json({ error: "accountId required" });
+  res.json(await accountValueHistory(accountId, range || "6mo"));
 });
 
 // POST /holdings — add a position by hand
@@ -118,11 +157,12 @@ router.post("/", async (req, res) => {
 });
 
 router.put("/:id", async (req, res) => {
-  const { quantity, avgCost, name, symbol } = req.body;
+  const { quantity, avgCost, name, symbol, lossAlertPercent } = req.body;
   const data = {};
   if (quantity !== undefined) data.quantity = Number(quantity);
   if (avgCost !== undefined) data.avgCost = avgCost === "" ? null : Number(avgCost);
   if (name !== undefined) data.name = name || null;
+  if (lossAlertPercent !== undefined) data.lossAlertPercent = (lossAlertPercent === null || lossAlertPercent === "") ? null : Math.abs(Number(lossAlertPercent));
 
   // Imported tickers do not always match a tradeable symbol (Maybe exports
   // "REINMETHAL" for Rheinmetall), so the symbol can be corrected and the price

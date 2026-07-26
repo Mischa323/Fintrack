@@ -49,6 +49,8 @@ model Holding {
   currency    String    @default("USD") // currency the price is quoted in
   lastPrice   Decimal?
   lastPriceAt DateTime?
+  // Alert when the unrealised loss vs avgCost reaches this many percent
+  lossAlertPercent Decimal?
   trades      Trade[]
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt

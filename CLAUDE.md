@@ -88,7 +88,7 @@ To actually get Watchtower auto-updates, images must be published (GitHub Action
 
 `backend/package.json` `version` is the **single source of truth** — bump it on
 every meaningful change (keep `frontend/package.json` in sync for tidiness).
-Currently **1.20.0**.
+Currently **1.21.0**.
 
 - `GET /version` → `{ version, buildTime }` (authenticated)
 - `GET /version/check` → compares against the `version` in `backend/package.json`
@@ -281,6 +281,49 @@ a one-off `opening` trade seeded from its current quantity/avgCost the first tim
 a trade is recorded, so the ledger stays complete. The opening trade always
 replays first regardless of later trade dates. `GET/POST /holdings/:id/trades`,
 `DELETE /holdings/:id/trades/:tradeId`.
+
+The buy/sell modal (`HoldingTradesModal` in `Accounts.jsx`) was defined but never
+rendered — the ⇄ button set state that nothing displayed, so recording trades was
+dead from the UI. It is now rendered inside `HoldingsModal`.
+
+## Investment accounts: transfers only, value chart, loss alerts
+
+Three things an investment account needs that a normal account does not, all
+added in v1.21.0.
+
+**No income/expense — transfers and the trade ledger only.** An investment
+account's balance is `recalculateAccountValue()` over its holdings, so a typed
+income or expense on it is meaningless and would be clobbered on the next price
+refresh. `POST /transactions` rejects any non-TRANSFER row whose `accountId` is an
+INVESTMENT account (400). Transfers in/out are allowed (that is how money reaches
+the account to buy, and leaves when you sell). The Transactions add-form mirrors
+this: picking an investment account for expense/income shows a notice with a
+"Switch to transfer" button and disables Save. Buys and sells live under Holdings.
+
+**Value over time** (`services/valueHistory.js`, `GET /holdings/history?accountId=&range=`).
+Reconstructs what the account was worth on each past day as
+Σ(quantity-that-day × close-that-day × FX-that-day) — real history, not
+forward-only snapshots, so the chart is populated the moment a position exists.
+- Quantity per day: a holding **with recorded trades** replays them dated on or
+  before the day (appears from its opening date, each buy/sell adjusts). A holding
+  with **no trades** (imported) assumes the *current* quantity throughout, since
+  the real purchase dates are unknown — the chart then shows how what you hold now
+  has moved, which is what was asked for.
+- Each symbol's last close is **carried forward across the shared day axis**, so a
+  day one market is closed (a US holiday, or Amsterdam's) does not drop that
+  holding to zero and make the line zigzag. Verified: a mixed EUR/USD account no
+  longer dips on 1 May (NL Labour Day).
+- Reuses the Yahoo chart endpoint (`interval=1d&range=`) and Frankfurter's range
+  endpoint for FX; both already used by `services/quotes.js`. Ranges: 1mo/3mo/6mo/
+  1y/2y/max. Recharts `AreaChart` in `Accounts.jsx` `ValueHistoryChart`.
+
+**Loss alerts** (`Holding.lossAlertPercent`, user-set per position). `withGain()`
+in `routes/holdings.js` adds `gainPercent` and `alertTriggered` (true when the
+unrealised gain vs avgCost is ≤ −threshold) to every holding in `GET /holdings`.
+`GET /holdings/alerts` returns just the breached positions for a badge/summary.
+`PUT /holdings/:id` takes `lossAlertPercent` (absolute value; `""`/`null` clears).
+The Holdings table shows a 🔔/🔕 toggle per row and a red "past −X% alert" marker
+when triggered. Nothing is pushed anywhere — the alert is surfaced in the UI.
 
 ## Bulk transaction actions
 

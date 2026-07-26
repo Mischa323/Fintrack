@@ -242,6 +242,10 @@ export default function Transactions() {
     if (!form.description.trim()) { setSaveError("Description is required"); return; }
     if (!form.amount || Number(form.amount) <= 0) { setSaveError("Enter a valid amount"); return; }
     if (!form.accountId) { setSaveError("Select an account"); return; }
+    if (form.type !== "TRANSFER" && accounts.find((a) => a.id === form.accountId)?.type === "INVESTMENT") {
+      setSaveError("Investment accounts only take transfers. Record buys and sells under Holdings.");
+      return;
+    }
     if (form.type === "TRANSFER" && !form.toAccountId) { setSaveError("Select a destination account"); return; }
     if (form.type === "TRANSFER" && form.toAccountId === form.accountId) { setSaveError("From and To accounts must be different"); return; }
 
@@ -318,6 +322,12 @@ export default function Transactions() {
 
   const allCategories = categories.flatMap((c) => [c, ...(c.children || [])]);
   const isTransfer = form.type === "TRANSFER";
+  // An investment account's balance is the value of its holdings, so income and
+  // expense on it are meaningless — only transfers in and out, and buys/sells
+  // recorded under Holdings. The picked account decides whether the form is
+  // blocked; transfers are always fine.
+  const selectedAccount = accounts.find((a) => a.id === form.accountId);
+  const investmentBlocked = !isTransfer && selectedAccount?.type === "INVESTMENT";
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
@@ -598,7 +608,21 @@ export default function Transactions() {
                 </label>
               )}
 
-              {!isTransfer && (
+              {investmentBlocked && (
+                <div style={{ padding: "12px 14px", borderRadius: 10, background: "rgba(129,140,248,0.1)", border: "1px solid rgba(129,140,248,0.3)", fontSize: 13, color: "#c7d2fe", lineHeight: 1.5 }}>
+                  <strong>{selectedAccount.name}</strong> is an investment account — its balance follows its holdings, so it only records transfers in and out. Buy and sell under <strong>Holdings</strong>.
+                  <button
+                    type="button"
+                    className="glass-btn glass-btn-ghost"
+                    style={{ padding: "5px 12px", fontSize: 12, marginTop: 8, display: "block" }}
+                    onClick={() => setForm({ ...form, type: "TRANSFER", toAccountId: "" })}
+                  >
+                    Switch to transfer
+                  </button>
+                </div>
+              )}
+
+              {!isTransfer && !investmentBlocked && (
                 <label style={labelStyle}>
                   Category
                   <select className="glass-input" style={{ ...fieldStyle, marginTop: 6 }} value={form.categoryId} onChange={(e) => setForm({ ...form, categoryId: e.target.value })}>
@@ -622,7 +646,7 @@ export default function Transactions() {
 
             <div style={{ display: "flex", gap: 10, marginTop: 20, justifyContent: "flex-end" }}>
               <button className="glass-btn glass-btn-ghost" style={{ padding: "10px 22px" }} onClick={() => setModal(false)}>Cancel</button>
-              <button className="glass-btn glass-btn-primary" style={{ padding: "10px 22px", opacity: saving ? 0.7 : 1 }} onClick={save} disabled={saving}>
+              <button className="glass-btn glass-btn-primary" style={{ padding: "10px 22px", opacity: (saving || investmentBlocked) ? 0.5 : 1 }} onClick={save} disabled={saving || investmentBlocked}>
                 {saving ? "Saving…" : "Save"}
               </button>
             </div>
