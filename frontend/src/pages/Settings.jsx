@@ -643,16 +643,19 @@ function AiConfig() {
 
       <Alert type={msg?.type} message={msg?.text} />
 
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
-        <Field label="Ollama address">
-          <input
-            className="glass-input" style={inp}
-            value={config.aiUrl}
-            onChange={(e) => setConfig((c) => ({ ...c, aiUrl: e.target.value }))}
-            placeholder="http://host.docker.internal:11434"
-          />
-        </Field>
-        <Field label="Model">
+      <Field label="Ollama address">
+        <input
+          className="glass-input" style={inp}
+          value={config.aiUrl}
+          onChange={(e) => setConfig((c) => ({ ...c, aiUrl: e.target.value }))}
+          placeholder="http://host.docker.internal:11434"
+        />
+      </Field>
+
+      {/* Two models, side by side, each captioned with what it actually does */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginTop: 4 }}>
+        <div>
+          <div style={labelStyle}>Text model</div>
           {status?.models?.length > 0 ? (
             <select
               className="glass-input" style={inp}
@@ -670,35 +673,44 @@ function AiConfig() {
               placeholder="llama3.2 or qwen2.5"
             />
           )}
-        </Field>
+          <div style={{ fontSize: 12, color: "rgba(255,255,255,0.4)", marginTop: 6, lineHeight: 1.6 }}>
+            Used for <strong style={{ color: "rgba(255,255,255,0.6)" }}>category suggestions</strong>,
+            tidying transaction names, and reading <strong style={{ color: "rgba(255,255,255,0.6)" }}>PDF</strong> invoices and payslips.
+            An ordinary text model — not a coder or vision model.
+          </div>
+        </div>
+
+        <div>
+          <div style={labelStyle}>Vision model</div>
+          {status?.visionModels?.length > 0 ? (
+            <select
+              className="glass-input" style={inp}
+              value={config.aiVisionModel}
+              onChange={(e) => setConfig((c) => ({ ...c, aiVisionModel: e.target.value }))}
+            >
+              <option value="">None</option>
+              {status.visionModels.map((m) => <option key={m} value={m}>{m}</option>)}
+            </select>
+          ) : (
+            <input
+              className="glass-input" style={inp}
+              value={config.aiVisionModel}
+              onChange={(e) => setConfig((c) => ({ ...c, aiVisionModel: e.target.value }))}
+              placeholder="qwen3-vl"
+            />
+          )}
+          <div style={{ fontSize: 12, color: "rgba(255,255,255,0.4)", marginTop: 6, lineHeight: 1.6 }}>
+            Used only for <strong style={{ color: "rgba(255,255,255,0.6)" }}>photographed</strong> receipts.
+            Leave empty if you only upload PDFs. Must be able to read images (e.g. qwen3-vl).
+          </div>
+        </div>
       </div>
 
-      <Field label="Vision model (for receipt photos)">
-        {status?.visionModels?.length > 0 ? (
-          <select
-            className="glass-input" style={inp}
-            value={config.aiVisionModel}
-            onChange={(e) => setConfig((c) => ({ ...c, aiVisionModel: e.target.value }))}
-          >
-            <option value="">None — PDFs only</option>
-            {status.visionModels.map((m) => <option key={m} value={m}>{m}</option>)}
-          </select>
-        ) : (
-          <input
-            className="glass-input" style={inp}
-            value={config.aiVisionModel}
-            onChange={(e) => setConfig((c) => ({ ...c, aiVisionModel: e.target.value }))}
-            placeholder="qwen3-vl"
-          />
-        )}
-      </Field>
-      <div style={{ fontSize: 12, color: "rgba(255,255,255,0.35)", lineHeight: 1.7, margin: "6px 0 16px" }}>
-        Only used to read photographed receipts. Keep it separate from the model above: a vision
-        model is a poor text extractor — it reasons until it runs out of budget on a long document,
-        where the ordinary model returns the right figures in a second. PDFs are read as text and
-        need no vision model at all.
+      <div style={{ fontSize: 12, color: "rgba(255,255,255,0.35)", lineHeight: 1.7, margin: "12px 0 16px" }}>
+        They are kept separate on purpose: a vision model reasons until it runs out of budget on a
+        long document, where the text model returns the right figures in a second.
         {status?.ok && status.visionModels?.length === 0 && (
-          <span style={{ color: "#fbbf24" }}> None of your models can read images — pull one, e.g. <code>ollama pull qwen3-vl:8b</code>.</span>
+          <span style={{ color: "#fbbf24" }}> None of your models can read images — pull one to scan photos, e.g. <code>ollama pull qwen3-vl:8b</code>.</span>
         )}
       </div>
 

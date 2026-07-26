@@ -77,13 +77,28 @@ function ReviewModal({ receipt, matches: initialMatches, accounts, categories, o
     type: form.type,
   }));
 
+  const [rematching, setRematching] = useState(false);
+  const [rematchNote, setRematchNote] = useState(null);
+
   const rematch = async () => {
-    setBusy(true);
+    setRematching(true);
+    setRematchNote(null);
     try {
-      const r = await receiptsApi.rematch(receipt.id);
+      // A guaranteed brief spinner, so a fast query does not flash by invisibly
+      const [r] = await Promise.all([
+        receiptsApi.rematch(receipt.id),
+        new Promise((res) => setTimeout(res, 400)),
+      ]);
       setMatches(r.matches);
+      setRematchNote(
+        r.matches.length > 0
+          ? `Found ${r.matches.length} possible match${r.matches.length === 1 ? "" : "es"}`
+          : "Checked again — still no matching transaction"
+      );
+    } catch (e) {
+      setRematchNote(e.response?.data?.error || e.message);
     } finally {
-      setBusy(false);
+      setRematching(false);
     }
   };
 
@@ -230,12 +245,30 @@ function ReviewModal({ receipt, matches: initialMatches, accounts, categories, o
             )}
           </div>
 
-          <div style={{ display: "flex", gap: 10, marginTop: 18, paddingTop: 16, borderTop: "1px solid rgba(255,255,255,0.08)", flexWrap: "wrap" }}>
-            <button className="glass-btn glass-btn-ghost" style={{ padding: "9px 16px" }} onClick={onClose}>Close</button>
+          {rematchNote && (
+            <div style={{ marginTop: 10, fontSize: 13, color: matches.length > 0 ? "#34d399" : "rgba(255,255,255,0.5)" }}>
+              {rematchNote}
+            </div>
+          )}
+
+          <div style={{ display: "flex", gap: 10, marginTop: 14, paddingTop: 16, borderTop: "1px solid rgba(255,255,255,0.08)", flexWrap: "wrap", alignItems: "center" }}>
+            <button className="glass-btn glass-btn-ghost" style={{ padding: "9px 16px" }} onClick={onClose} disabled={rematching}>Close</button>
             {!creating ? (
               <>
-                <button className="glass-btn glass-btn-ghost" style={{ padding: "9px 16px" }} onClick={rematch} disabled={busy}>
-                  ↻ Look again
+                <button
+                  className="glass-btn glass-btn-ghost"
+                  style={{ padding: "9px 16px", opacity: (busy || rematching) ? 0.6 : 1, display: "flex", alignItems: "center", gap: 8 }}
+                  onClick={rematch}
+                  disabled={busy || rematching}
+                >
+                  {rematching && (
+                    <span style={{
+                      width: 13, height: 13, borderRadius: "50%",
+                      border: "2px solid rgba(255,255,255,0.25)", borderTopColor: "#c7d2fe",
+                      display: "inline-block", animation: "spin 0.7s linear infinite",
+                    }} />
+                  )}
+                  {rematching ? "Looking…" : "↻ Look again"}
                 </button>
                 <button className="glass-btn glass-btn-ghost" style={{ padding: "9px 16px", marginLeft: "auto" }} onClick={dismiss} disabled={busy}>
                   No match

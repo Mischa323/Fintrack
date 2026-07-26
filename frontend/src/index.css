@@ -260,3 +260,6 @@ select option {
   0% { background-position: -200% center; }
   100% { background-position: 200% center; }
 }
+
+/* Small inline spinner for buttons/loading states */
+@keyframes spin { to { transform: rotate(360deg); } }
