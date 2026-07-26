@@ -75,9 +75,14 @@ function ReviewModal({ receipt, matches: initialMatches, accounts, categories, o
         <div style={{ flex: "0 0 300px", display: "flex", flexDirection: "column" }}>
           <div style={{ fontSize: 12, color: "rgba(255,255,255,0.4)", marginBottom: 8 }}>{receipt.filename}</div>
           <div style={{ flex: 1, overflow: "auto", borderRadius: 10, background: "rgba(0,0,0,0.25)", padding: 8 }}>
-            {imageUrl
-              ? <img src={imageUrl} alt={receipt.filename} style={{ width: "100%", borderRadius: 6, display: "block" }} />
-              : <div style={{ padding: "40px 0", textAlign: "center", color: "rgba(255,255,255,0.3)", fontSize: 13 }}>Loading image…</div>}
+            {!imageUrl ? (
+              <div style={{ padding: "40px 0", textAlign: "center", color: "rgba(255,255,255,0.3)", fontSize: 13 }}>Loading…</div>
+            ) : receipt.mimeType === "application/pdf" ? (
+              // A PDF cannot go in an <img>; the browser's viewer renders the blob
+              <iframe src={imageUrl} title={receipt.filename} style={{ width: "100%", height: "100%", minHeight: 380, border: "none", borderRadius: 6, background: "#fff" }} />
+            ) : (
+              <img src={imageUrl} alt={receipt.filename} style={{ width: "100%", borderRadius: 6, display: "block" }} />
+            )}
           </div>
         </div>
 
