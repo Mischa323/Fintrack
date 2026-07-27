@@ -33,6 +33,7 @@ model Account {
   recurring      RecurringTransaction[]
   goals          Goal[]
   holdings       Holding[]
+  loans          Loan[]
 }
 
 // An investment position. Revolut and other brokers expose no API for personal
@@ -101,6 +102,12 @@ model Loan {
   color       String        @default("#6366f1")
   // Kept for the record once settled, but hidden from the active list.
   archived    Boolean       @default(false)
+  // Optional link to a real account. When set, the money leaving on the loan and
+  // each repayment coming back are booked as transactions there, so its balance
+  // stays in step. Left null, the loan is pure tracking that never moves a balance.
+  accountId         String?
+  account           Account?      @relation(fields: [accountId], references: [id], onDelete: SetNull)
+  lendTransactionId String? // the EXPENSE booked when lending, if linked
   payments    LoanPayment[]
   createdAt   DateTime      @default(now())
   updatedAt   DateTime      @updatedAt
@@ -113,6 +120,7 @@ model LoanPayment {
   amount    Decimal
   date      DateTime
   notes     String?
+  transactionId String? // the INCOME booked on the loan's account, if linked
   createdAt DateTime @default(now())
 
   @@index([loanId])

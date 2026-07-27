@@ -88,7 +88,7 @@ To actually get Watchtower auto-updates, images must be published (GitHub Action
 
 `backend/package.json` `version` is the **single source of truth** — bump it on
 every meaningful change (keep `frontend/package.json` in sync for tidiness).
-Currently **1.22.0**.
+Currently **1.23.0**.
 
 - `GET /version` → `{ version, buildTime }` (authenticated)
 - `GET /version/check` → compares against the `version` in `backend/package.json`
@@ -332,9 +332,11 @@ always visible. Added in v1.22.0. `Loan` (person, description, principal,
 currency, date, dueDate, notes, color, archived) + `LoanPayment` (amount, date,
 notes); `routes/loans.js`, page `Loans.jsx`, nav "Money Lent".
 
-- **Deliberately standalone from account balances.** It records who owes what,
-  not a movement of money in a FinTrack account — the same choice Goals makes.
-  So lending and repayment do **not** create transactions or touch any balance.
+- **Standalone by default, optionally linked to an account** (`Loan.accountId`,
+  added v1.23.0). Left unlinked it is pure tracking that never moves a balance —
+  who owes what, not a movement of money (the same choice Goals makes). Linked,
+  the money is booked as real transactions so a chosen account's balance stays in
+  step (see below).
 - **Outstanding is derived, never stored** — `withComputed()` returns `repaid`
   (Σ payments), `outstanding` (principal − repaid), `settled` (≤ a cent of
   slack), `overpaid`, and `progress` %. Deleting a mistaken repayment recomputes
@@ -347,6 +349,26 @@ notes); `routes/loans.js`, page `Loans.jsx`, nav "Money Lent".
 - UI: cards with a repaid/principal progress bar and the amount still owed, an
   Overdue flag when `dueDate` has passed unpaid, a Paid-off badge when settled,
   and a repayment modal (history + "fill in the remaining" shortcut).
+
+**Account linking (v1.23.0).** Give a loan an `accountId` and lending is booked as
+an EXPENSE on it, each repayment as an INCOME — so a full repayment nets back to
+the starting balance and the account is always right. Every booking is a real
+`Transaction` row, because `recalculateBalance` is openingBalance + Σ(transactions)
+and a direct balance nudge would be undone on the next recalc. `bookTx`/`reverseTx`
+in `routes/loans.js` create and undo those rows (adjusting the balance by ±amount);
+the ids live on `Loan.lendTransactionId` and `LoanPayment.transactionId`.
+- **PUT rebooks cleanly**: it reverses every booking the loan made, applies the
+  edits, then re-creates them on the (possibly new) account — so changing the
+  amount, dates, or the linked account itself stays consistent, including moving
+  all past repayments to a newly chosen account.
+- **DELETE** (loan or payment) reverses the bookings first, leaving the balance as
+  if the loan had never touched it. `reverseTx` no-ops if the user deleted the
+  transaction directly in the Transactions page, so a dangling id is harmless.
+- **Investment accounts are rejected** (`checkLinkable`) — their balance comes from
+  holdings and would be clobbered on the next price refresh; the picker hides them.
+- These rows show as ordinary INCOME/EXPENSE in stats. Caveat: if the same money
+  also arrives via a bank import, it is counted twice — leave the loan unlinked to
+  avoid that, or reconcile. Linking is opt-in per loan.
 
 ## Bulk transaction actions
 

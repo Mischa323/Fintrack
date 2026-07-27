@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { loans as loansApi } from "../api/client";
+import { loans as loansApi, accounts as accountsApi } from "../api/client";
 import GlassCard from "../components/GlassCard";
 import { format, isPast } from "date-fns";
 
@@ -11,6 +11,7 @@ const money = (n, cur) =>
 const emptyForm = {
   person: "", description: "", principal: "", currency: "EUR",
   date: format(new Date(), "yyyy-MM-dd"), dueDate: "", notes: "", color: "#6366f1",
+  accountId: "",
 };
 
 const fieldStyle = { padding: "10px 14px", width: "100%", boxSizing: "border-box", display: "block", marginTop: 6 };
@@ -75,6 +76,11 @@ function LoanPaymentsModal({ loan, onClose, onChanged }) {
               ? <span style={{ color: "#34d399" }}> · paid off{cur.overpaid ? " (overpaid)" : ""}</span>
               : <span> · <strong style={{ color: "#fbbf24" }}>{money(cur.outstanding, cur.currency)}</strong> still owed</span>}
           </p>
+          {cur.account && (
+            <p style={{ margin: "6px 0 0", fontSize: 12, color: "#818cf8" }}>
+              🏦 Repayments are also added as income to {cur.account.name}.
+            </p>
+          )}
         </div>
 
         {/* Record a repayment */}
@@ -224,6 +230,7 @@ function LoanCard({ loan, onEdit, onDelete, onArchive, onRecord }) {
             📅 due {format(new Date(loan.dueDate), "dd MMM yyyy")}
           </span>
         )}
+        {loan.account && <span style={{ color: "#818cf8" }}>🏦 {loan.account.name}</span>}
       </div>
 
       {loan.notes && (
@@ -255,6 +262,7 @@ function LoanCard({ loan, onEdit, onDelete, onArchive, onRecord }) {
 export default function Loans() {
   const [items, setItems] = useState([]);
   const [summary, setSummary] = useState(null);
+  const [accounts, setAccounts] = useState([]);
   const [showArchived, setShowArchived] = useState(false);
   const [modal, setModal] = useState(false);
   const [form, setForm] = useState(emptyForm);
@@ -269,6 +277,11 @@ export default function Loans() {
   };
 
   useEffect(() => { load(); }, [showArchived]);
+  useEffect(() => { accountsApi.list().then(setAccounts); }, []);
+
+  // An investment account's balance is derived from its holdings, so a loan
+  // cannot be booked on it — the backend rejects it and the picker hides it.
+  const linkableAccounts = accounts.filter((a) => a.type !== "INVESTMENT");
 
   const open = (item = null) => {
     setEditing(item?.id || null);
@@ -282,6 +295,7 @@ export default function Loans() {
       dueDate: item.dueDate ? format(new Date(item.dueDate), "yyyy-MM-dd") : "",
       notes: item.notes || "",
       color: item.color,
+      accountId: item.accountId || "",
     } : emptyForm);
     setModal(true);
   };
@@ -296,6 +310,7 @@ export default function Loans() {
         ...form,
         principal: Number(form.principal),
         dueDate: form.dueDate || null,
+        accountId: form.accountId || null,
       };
       if (editing) await loansApi.update(editing, payload);
       else await loansApi.create(payload);
@@ -422,6 +437,24 @@ export default function Loans() {
                   <input className="glass-input" style={fieldStyle} type="date" value={form.dueDate} onChange={(e) => setForm({ ...form, dueDate: e.target.value })} />
                 </label>
               </div>
+
+              <label style={labelStyle}>
+                Linked account <span style={{ color: "rgba(255,255,255,0.3)", fontWeight: 400 }}>(optional)</span>
+                <select className="glass-input" style={fieldStyle} value={form.accountId} onChange={(e) => setForm({ ...form, accountId: e.target.value })}>
+                  <option value="">Don't touch any balance — just track it</option>
+                  {linkableAccounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+                </select>
+                <div style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", marginTop: 6, lineHeight: 1.5 }}>
+                  Pick an account and the amount lent is booked as an expense on it and every
+                  repayment as income, so its balance stays in step. A full repayment nets back
+                  to zero. Leave empty to keep this purely for tracking.
+                  {form.accountId && editing && (
+                    <span style={{ display: "block", color: "#fbbf24", marginTop: 4 }}>
+                      Changing this re-books the loan and its repayments on the chosen account.
+                    </span>
+                  )}
+                </div>
+              </label>
 
               <label style={labelStyle}>
                 Notes <span style={{ color: "rgba(255,255,255,0.3)", fontWeight: 400 }}>(optional)</span>
