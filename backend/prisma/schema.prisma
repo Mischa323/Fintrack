@@ -86,6 +86,38 @@ model Goal {
   updatedAt    DateTime  @updatedAt
 }
 
+// Money lent to a person, tracked so repayments can be logged and the
+// outstanding balance seen. Deliberately standalone from account balances — it
+// records who owes what, not a movement of money in a FinTrack account.
+model Loan {
+  id          String        @id @default(cuid())
+  person      String // who borrowed the money
+  description String? // what it was for
+  principal   Decimal // amount lent
+  currency    String        @default("EUR")
+  date        DateTime // when it was lent
+  dueDate     DateTime? // when it is expected back
+  notes       String?
+  color       String        @default("#6366f1")
+  // Kept for the record once settled, but hidden from the active list.
+  archived    Boolean       @default(false)
+  payments    LoanPayment[]
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+}
+
+model LoanPayment {
+  id        String   @id @default(cuid())
+  loanId    String
+  loan      Loan     @relation(fields: [loanId], references: [id], onDelete: Cascade)
+  amount    Decimal
+  date      DateTime
+  notes     String?
+  createdAt DateTime @default(now())
+
+  @@index([loanId])
+}
+
 model Category {
   id           String                 @id @default(cuid())
   name         String                 @unique

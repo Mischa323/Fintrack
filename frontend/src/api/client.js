@@ -171,6 +171,17 @@ export const goals = {
   remove: (id) => api.delete(`/goals/${id}`),
 };
 
+export const loans = {
+  list: (includeArchived) => api.get("/loans", { params: { includeArchived } }).then((r) => r.data),
+  summary: () => api.get("/loans/summary").then((r) => r.data),
+  create: (data) => api.post("/loans", data).then((r) => r.data),
+  update: (id, data) => api.put(`/loans/${id}`, data).then((r) => r.data),
+  remove: (id) => api.delete(`/loans/${id}`),
+  archive: (id, archived) => api.post(`/loans/${id}/archive`, { archived }).then((r) => r.data),
+  addPayment: (id, data) => api.post(`/loans/${id}/payments`, data).then((r) => r.data),
+  removePayment: (id, paymentId) => api.delete(`/loans/${id}/payments/${paymentId}`).then((r) => r.data),
+};
+
 export const backup = {
   list: () => api.get("/backup").then((r) => r.data),
   create: (data) => api.post("/backup", data).then((r) => r.data),

@@ -31,7 +31,7 @@ backend/
   src/services/                 # backupService, recurringService, jwtSecret
 frontend/
   src/pages/                    # Dashboard, Accounts, Transactions, Categories,
-                                #   Recurring, Goals, Import, Settings, Login
+                                #   Recurring, Goals, Loans, Import, Settings, Login
   src/api/client.js             # axios API client
   nginx-spa.conf                # serves the SPA AND proxies /api to the backend
 nginx/nginx.conf                # legacy standalone proxy (3-service compose only)
@@ -88,7 +88,7 @@ To actually get Watchtower auto-updates, images must be published (GitHub Action
 
 `backend/package.json` `version` is the **single source of truth** — bump it on
 every meaningful change (keep `frontend/package.json` in sync for tidiness).
-Currently **1.21.0**.
+Currently **1.22.0**.
 
 - `GET /version` → `{ version, buildTime }` (authenticated)
 - `GET /version/check` → compares against the `version` in `backend/package.json`
@@ -324,6 +324,29 @@ unrealised gain vs avgCost is ≤ −threshold) to every holding in `GET /holdin
 `PUT /holdings/:id` takes `lossAlertPercent` (absolute value; `""`/`null` clears).
 The Holdings table shows a 🔔/🔕 toggle per row and a red "past −X% alert" marker
 when triggered. Nothing is pushed anywhere — the alert is surfaced in the UI.
+
+## Money lent (loans to people)
+
+Track money lent to a person and log repayments so the outstanding balance is
+always visible. Added in v1.22.0. `Loan` (person, description, principal,
+currency, date, dueDate, notes, color, archived) + `LoanPayment` (amount, date,
+notes); `routes/loans.js`, page `Loans.jsx`, nav "Money Lent".
+
+- **Deliberately standalone from account balances.** It records who owes what,
+  not a movement of money in a FinTrack account — the same choice Goals makes.
+  So lending and repayment do **not** create transactions or touch any balance.
+- **Outstanding is derived, never stored** — `withComputed()` returns `repaid`
+  (Σ payments), `outstanding` (principal − repaid), `settled` (≤ a cent of
+  slack), `overpaid`, and `progress` %. Deleting a mistaken repayment recomputes
+  cleanly, the same pattern as a holding replaying its trades.
+- `GET /loans` lists active loans (`?includeArchived=true` adds filed-away ones);
+  `GET /loans/summary` gives header totals (lent, repaid, outstanding, people).
+- `POST/PUT/DELETE /loans[/:id]`, `POST /loans/:id/archive { archived }` to file a
+  settled loan without deleting its history, and
+  `GET/POST /loans/:id/payments` + `DELETE /loans/:id/payments/:paymentId`.
+- UI: cards with a repaid/principal progress bar and the amount still owed, an
+  Overdue flag when `dueDate` has passed unpaid, a Paid-off badge when settled,
+  and a repayment modal (history + "fill in the remaining" shortcut).
 
 ## Bulk transaction actions
 

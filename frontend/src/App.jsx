@@ -12,6 +12,7 @@ import Recurring from "./pages/Recurring";
 import Import from "./pages/Import";
 import Receipts from "./pages/Receipts";
 import Goals from "./pages/Goals";
+import Loans from "./pages/Loans";
 import Settings from "./pages/Settings";
 
 export default function App() {
@@ -35,6 +36,7 @@ export default function App() {
             <Route path="transactions" element={<Transactions />} />
             <Route path="categories" element={<Categories />} />
             <Route path="goals" element={<Goals />} />
+            <Route path="loans" element={<Loans />} />
             <Route path="recurring" element={<Recurring />} />
             <Route path="receipts" element={<Receipts />} />
             <Route path="import" element={<Import />} />
