@@ -8,24 +8,48 @@ const prisma = new PrismaClient();
 
 router.get("/", async (req, res) => {
   const accounts = await prisma.account.findMany({
-    orderBy: { createdAt: "asc" },
+    // User-set order first; createdAt breaks ties so accounts that predate the
+    // ordering feature (all at sortOrder 0) keep their original sequence.
+    orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
   });
   res.json(accounts);
 });
 
 router.post("/", async (req, res) => {
-  const { name, type, currency, balance, color, icon, institution, iban } = req.body;
+  const { name, type, currency, balance, color, icon, institution, iban, groupName } = req.body;
+  // New accounts go to the end of the list.
+  const last = await prisma.account.aggregate({ _max: { sortOrder: true } });
   const account = await prisma.account.create({
-    data: { name, type, currency: currency || "EUR", balance: balance || 0, color, icon, institution, iban: normaliseIban(iban) },
+    data: {
+      name, type, currency: currency || "EUR", balance: balance || 0, color, icon, institution,
+      iban: normaliseIban(iban),
+      groupName: groupName?.trim() || null,
+      sortOrder: (last._max.sortOrder ?? 0) + 1,
+    },
   });
   res.status(201).json(account);
 });
 
+// PUT /accounts/reorder — persist a new display order from a list of ids. Must
+// come before "/:id" so "reorder" is not swallowed as an account id.
+router.put("/reorder", async (req, res) => {
+  const ids = Array.isArray(req.body.ids) ? req.body.ids.filter(Boolean) : [];
+  if (ids.length === 0) return res.status(400).json({ error: "No account order given" });
+  await prisma.$transaction(
+    ids.map((id, index) => prisma.account.update({ where: { id }, data: { sortOrder: index } }))
+  );
+  res.json({ ordered: ids.length });
+});
+
 router.put("/:id", async (req, res) => {
-  const { name, type, currency, color, icon, institution, iban } = req.body;
+  const { name, type, currency, color, icon, institution, iban, groupName } = req.body;
   const account = await prisma.account.update({
     where: { id: req.params.id },
-    data: { name, type, currency, color, icon, institution, iban: normaliseIban(iban) },
+    data: {
+      name, type, currency, color, icon, institution,
+      iban: normaliseIban(iban),
+      ...(groupName !== undefined ? { groupName: groupName?.trim() || null } : {}),
+    },
   });
   res.json(account);
 });

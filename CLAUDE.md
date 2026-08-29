@@ -88,7 +88,7 @@ To actually get Watchtower auto-updates, images must be published (GitHub Action
 
 `backend/package.json` `version` is the **single source of truth** — bump it on
 every meaningful change (keep `frontend/package.json` in sync for tidiness).
-Currently **1.23.1**.
+Currently **1.24.0**.
 
 - `GET /version` → `{ version, buildTime }` (authenticated)
 - `GET /version/check` → compares against the `version` in `backend/package.json`
@@ -377,6 +377,40 @@ the ids live on `Loan.lendTransactionId` and `LoanPayment.transactionId`.
 - These rows show as ordinary INCOME/EXPENSE in stats. Caveat: if the same money
   also arrives via a bank import, it is counted twice — leave the loan unlinked to
   avoid that, or reconcile. Linking is opt-in per loan.
+
+## Account ordering and grouping (v1.24.0)
+
+Accounts have `sortOrder` (Int) and `groupName` (String?). `GET /accounts` orders
+by `[{ sortOrder }, { createdAt }]` — the createdAt tiebreak keeps pre-feature
+accounts (all at 0) in their original sequence. `PUT /accounts/reorder { ids }`
+persists a new order (sortOrder = index); it is declared **before** `/:id` so the
+literal "reorder" is not captured as an id. New accounts get `max(sortOrder)+1`.
+
+- The Accounts page (`Accounts.jsx`) renders accounts grouped by `groupName` under
+  headings with a per-group balance subtotal; ungrouped accounts fall under an
+  "Ungrouped" heading (only shown when at least one group exists).
+- **Drag-and-drop** via a `⠿` handle on each card (native HTML5 DnD, no library):
+  dragging over a card moves the dragged one to that spot **and adopts the
+  target's group**, so dropping a card onto another group moves it there. On drop,
+  `finishDrag` saves the order (`reorder`) and the moved card's group (`update`).
+- `GlassCard` now spreads `...rest` onto its div so it can be a drop target.
+- The group is also settable in the account Edit form (a datalist of existing
+  groups).
+
+## Transaction modal shortcuts (v1.24.0)
+
+Three quick-entry conveniences in the Add/Edit Transaction form (`Transactions.jsx`):
+- **Remembers the account you're on**: opening "Add" while filtered to one account
+  defaults the account (and a transfer's "from") to it — `open()` seeds
+  `accountId` from `filters.accountId` before falling back to the first account.
+- **Inline category creation**: a "+ New" button beside the category select
+  prompts for a name, `POST /categories`, reloads, and selects it — no trip to the
+  Categories page.
+- **Make it a subscription**: a toggle (new income/expense only; recurring
+  transfers aren't modelled) reveals a frequency picker. On save it records the
+  one-off payment now **and** creates a `RecurringTransaction` whose `startDate` is
+  the *next* period (`nextPeriod()` mirrors `addPeriod()` in recurringService), so
+  today's charge isn't duplicated.
 
 ## Bulk transaction actions
 

@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { useSearchParams } from "react-router-dom";
-import { transactions as txApi, accounts as accountsApi, categories as catsApi, ai as aiApi } from "../api/client";
+import { transactions as txApi, accounts as accountsApi, categories as catsApi, ai as aiApi, recurring as recurringApi } from "../api/client";
 import GlassCard from "../components/GlassCard";
 import { format } from "date-fns";
 
@@ -11,7 +11,30 @@ const emptyForm = {
   amount: "", description: "",
   date: format(new Date(), "yyyy-MM-dd"),
   type: "EXPENSE", notes: "",
+  recurring: false, frequency: "MONTHLY",
 };
+
+// Frequencies the recurring processor understands, with readable labels.
+const FREQUENCIES = [
+  ["WEEKLY", "Weekly"],
+  ["BIWEEKLY", "Every 2 weeks"],
+  ["MONTHLY", "Monthly"],
+  ["QUARTERLY", "Quarterly"],
+  ["YEARLY", "Yearly"],
+];
+
+// Mirrors addPeriod() in backend recurringService, so the first scheduled charge
+// is the NEXT period — this transaction covers the current one.
+function nextPeriod(dateStr, frequency) {
+  const d = new Date(dateStr);
+  if (frequency === "WEEKLY") d.setDate(d.getDate() + 7);
+  else if (frequency === "BIWEEKLY") d.setDate(d.getDate() + 14);
+  else if (frequency === "MONTHLY") d.setMonth(d.getMonth() + 1);
+  else if (frequency === "QUARTERLY") d.setMonth(d.getMonth() + 3);
+  else if (frequency === "YEARLY") d.setFullYear(d.getFullYear() + 1);
+  else d.setDate(d.getDate() + 1);
+  return format(d, "yyyy-MM-dd");
+}
 
 const fieldStyle = { padding: "10px 14px", width: "100%", boxSizing: "border-box", display: "block" };
 const labelStyle = { fontSize: 12, color: "rgba(255,255,255,0.5)", fontWeight: 500, display: "block", marginBottom: 16 };
@@ -234,7 +257,13 @@ export default function Transactions() {
       date: format(new Date(item.date), "yyyy-MM-dd"),
       type: item.type,
       notes: item.notes || "",
-    } : { ...emptyForm, accountId: accounts[0]?.id || "" });
+    } : {
+      ...emptyForm,
+      // Remember the account you're viewing: opening "Add" while filtered to one
+      // account defaults to it (the "from" account for a transfer too), so you
+      // don't reselect it every time.
+      accountId: filters.accountId || accounts[0]?.id || "",
+    });
     setModal(true);
   };
 
@@ -253,8 +282,25 @@ export default function Transactions() {
     setSaving(true);
     try {
       const payload = { ...form, amount: Number(form.amount), categoryId: form.categoryId || null };
-      if (editing) await txApi.update(editing, payload);
-      else await txApi.create(payload);
+      if (editing) {
+        await txApi.update(editing, payload);
+      } else {
+        await txApi.create(payload);
+        // Set up the subscription alongside this payment: the recorded one covers
+        // now, the recurring entry schedules the next charge onward.
+        if (form.recurring && form.type !== "TRANSFER") {
+          await recurringApi.create({
+            accountId: form.accountId,
+            categoryId: form.categoryId || null,
+            amount: Number(form.amount),
+            description: form.description,
+            type: form.type,
+            frequency: form.frequency,
+            startDate: nextPeriod(form.date, form.frequency),
+            endDate: null,
+          });
+        }
+      }
       setModal(false);
       load();
     } catch (err) {
@@ -268,6 +314,21 @@ export default function Transactions() {
     if (!confirm("Delete this transaction?")) return;
     await txApi.remove(id);
     load();
+  };
+
+  // Create a category without leaving the form, so a missing one doesn't send you
+  // to the Categories page mid-entry. The new one is selected straight away.
+  const NEW_CAT_COLORS = ["#6366f1", "#8b5cf6", "#10b981", "#f59e0b", "#3b82f6", "#ec4899", "#ef4444", "#14b8a6"];
+  const addCategory = async () => {
+    const name = window.prompt("New category name")?.trim();
+    if (!name) return;
+    try {
+      const created = await catsApi.create({ name, color: NEW_CAT_COLORS[Math.floor(Math.random() * NEW_CAT_COLORS.length)] });
+      setCategories(await catsApi.list());
+      setForm((f) => ({ ...f, categoryId: created.id }));
+    } catch (e) {
+      setSaveError(e.response?.data?.error || e.message || "Could not create the category");
+    }
   };
 
   // ── Bulk selection ────────────────────────────────────────────
@@ -625,11 +686,40 @@ export default function Transactions() {
               {!isTransfer && !investmentBlocked && (
                 <label style={labelStyle}>
                   Category
-                  <select className="glass-input" style={{ ...fieldStyle, marginTop: 6 }} value={form.categoryId} onChange={(e) => setForm({ ...form, categoryId: e.target.value })}>
-                    <option value="">No category</option>
-                    {allCategories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-                  </select>
+                  <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
+                    <select className="glass-input" style={{ ...fieldStyle, marginTop: 0, flex: 1 }} value={form.categoryId} onChange={(e) => setForm({ ...form, categoryId: e.target.value })}>
+                      <option value="">No category</option>
+                      {allCategories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                    </select>
+                    <button type="button" className="glass-btn glass-btn-ghost" style={{ padding: "0 14px", whiteSpace: "nowrap" }} onClick={addCategory} title="Create a new category">
+                      + New
+                    </button>
+                  </div>
                 </label>
+              )}
+
+              {/* Turn this payment into a subscription without leaving the form.
+                  Only for new income/expense — recurring transfers aren't modelled. */}
+              {!isTransfer && !investmentBlocked && !editing && (
+                <div style={{ padding: "12px 14px", borderRadius: 10, background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)" }}>
+                  <label style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer", fontSize: 14 }}>
+                    <input type="checkbox" checked={form.recurring} onChange={(e) => setForm({ ...form, recurring: e.target.checked })} style={{ cursor: "pointer" }} />
+                    <span>Make this a subscription <span style={{ color: "rgba(255,255,255,0.4)" }}>— repeats automatically</span></span>
+                  </label>
+                  {form.recurring && (
+                    <div style={{ marginTop: 12 }}>
+                      <label style={{ ...labelStyle, marginBottom: 0 }}>
+                        Repeats
+                        <select className="glass-input" style={{ ...fieldStyle, marginTop: 6 }} value={form.frequency} onChange={(e) => setForm({ ...form, frequency: e.target.value })}>
+                          {FREQUENCIES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                        </select>
+                      </label>
+                      <div style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", marginTop: 6, lineHeight: 1.5 }}>
+                        This payment is recorded now; the next is scheduled for {format(new Date(nextPeriod(form.date, form.frequency)), "dd MMM yyyy")}. Manage it under Recurring.
+                      </div>
+                    </div>
+                  )}
+                </div>
               )}
 
               <label style={labelStyle}>

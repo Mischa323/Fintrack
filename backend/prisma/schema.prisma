@@ -26,6 +26,11 @@ model Account {
   icon         String?
   institution  String?
   iban         String?
+  // User-controlled display order and optional grouping label on the Accounts
+  // page. sortOrder is a global position; groupName gathers accounts under a
+  // shared heading (null = ungrouped).
+  sortOrder    Int                    @default(0)
+  groupName    String?
   createdAt    DateTime               @default(now())
   updatedAt    DateTime               @updatedAt
   transactions   Transaction[]          @relation("FromAccount")

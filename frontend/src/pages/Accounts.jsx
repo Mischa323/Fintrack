@@ -15,7 +15,7 @@ const TYPES = [
 const COLORS = ["#6366f1", "#8b5cf6", "#10b981", "#f59e0b", "#3b82f6", "#ec4899", "#ef4444", "#14b8a6"];
 const fmt = (n) => new Intl.NumberFormat("nl-NL", { style: "currency", currency: "EUR" }).format(n);
 
-const emptyForm = { name: "", type: "CHECKING", currency: "EUR", balance: "", color: "#6366f1", institution: "", iban: "" };
+const emptyForm = { name: "", type: "CHECKING", currency: "EUR", balance: "", color: "#6366f1", institution: "", iban: "", groupName: "" };
 
 const fieldStyle = { padding: "10px 14px", width: "100%", boxSizing: "border-box", display: "block", marginTop: 6 };
 const labelStyle = { fontSize: 12, color: "rgba(255,255,255,0.5)", fontWeight: 500, display: "block" };
@@ -586,6 +586,7 @@ export default function Accounts() {
   const [holdingsFor, setHoldingsFor] = useState(null);
   const [recalculating, setRecalculating] = useState(null);
   const [recalcMsg, setRecalcMsg] = useState(null);
+  const [dragId, setDragId] = useState(null);
 
   const load = () => accountsApi.list().then(setItems);
 
@@ -644,7 +645,7 @@ export default function Accounts() {
   const open = (item = null) => {
     setEditing(item?.id || null);
     setError("");
-    setForm(item ? { name: item.name, type: item.type, currency: item.currency, balance: item.balance, color: item.color, institution: item.institution || "", iban: item.iban || "" } : emptyForm);
+    setForm(item ? { name: item.name, type: item.type, currency: item.currency, balance: item.balance, color: item.color, institution: item.institution || "", iban: item.iban || "", groupName: item.groupName || "" } : emptyForm);
     setModal(true);
   };
 
@@ -671,6 +672,131 @@ export default function Accounts() {
     load();
   };
 
+  // ── Drag to reorder and to move an account into another group ───────────────
+  // Dragging over a card moves the dragged one to that spot and adopts the
+  // target's group, so dropping a card under a group's heading joins it. The new
+  // order and the moved card's group are saved when the drag ends.
+  const onDragOverCard = (e, target) => {
+    e.preventDefault();
+    if (!dragId || dragId === target.id) return;
+    setItems((cur) => {
+      const from = cur.findIndex((a) => a.id === dragId);
+      const to = cur.findIndex((a) => a.id === target.id);
+      if (from === -1 || to === -1 || from === to) return cur;
+      const next = cur.slice();
+      const [orig] = next.splice(from, 1);
+      next.splice(to, 0, { ...orig, groupName: target.groupName || null });
+      return next;
+    });
+  };
+
+  const finishDrag = async () => {
+    const id = dragId;
+    setDragId(null);
+    if (!id) return;
+    const dragged = items.find((a) => a.id === id);
+    try {
+      await accountsApi.reorder(items.map((a) => a.id));
+      if (dragged) {
+        await accountsApi.update(id, {
+          name: dragged.name, type: dragged.type, currency: dragged.currency,
+          color: dragged.color, institution: dragged.institution || "", iban: dragged.iban || "",
+          groupName: dragged.groupName || "",
+        });
+      }
+    } finally {
+      load();
+    }
+  };
+
+  // Gather accounts under their group label, groups in first-appearance order.
+  const groups = [];
+  const groupIndex = new Map();
+  for (const a of items) {
+    const key = a.groupName || "";
+    if (!groupIndex.has(key)) {
+      const g = { name: a.groupName || "", accounts: [] };
+      groupIndex.set(key, g);
+      groups.push(g);
+    }
+    groupIndex.get(key).accounts.push(a);
+  }
+  const hasGroups = groups.some((g) => g.name);
+  const groupNames = [...new Set(items.map((a) => a.groupName).filter(Boolean))];
+
+  const renderCard = (a) => (
+    <GlassCard
+      key={a.id}
+      onDragOver={(e) => onDragOverCard(e, a)}
+      style={{ borderLeft: `4px solid ${a.color}`, opacity: dragId === a.id ? 0.4 : 1 }}
+    >
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
+        <div style={{ display: "flex", alignItems: "flex-start", gap: 8, minWidth: 0 }}>
+          <span
+            draggable
+            onDragStart={() => setDragId(a.id)}
+            onDragEnd={finishDrag}
+            title="Drag to reorder, or onto another group to move it there"
+            style={{ cursor: "grab", color: "rgba(255,255,255,0.3)", fontSize: 18, lineHeight: 1.2, userSelect: "none" }}
+          >
+            ⠿
+          </span>
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontSize: 16, fontWeight: 600 }}>{a.name}</div>
+            {a.institution && <div style={{ fontSize: 12, color: "rgba(255,255,255,0.4)", marginTop: 2 }}>{a.institution}</div>}
+            <span style={{ fontSize: 11, background: "rgba(255,255,255,0.08)", padding: "2px 8px", borderRadius: 6, marginTop: 6, display: "inline-block", color: "rgba(255,255,255,0.5)" }}>
+              {TYPES.find((t) => t.value === a.type)?.label ?? a.type} · {a.currency}
+            </span>
+            {a.iban && (
+              <div style={{ fontSize: 11, color: "rgba(255,255,255,0.35)", marginTop: 4, fontFamily: "monospace", letterSpacing: "0.05em" }}>
+                {a.iban.replace(/\s/g, "").slice(0, -4).replace(/./g, "•").replace(/(.{4})/g, "$1 ").trim() + " " + a.iban.replace(/\s/g, "").slice(-4)}
+              </div>
+            )}
+          </div>
+        </div>
+        <div style={{ textAlign: "right" }}>
+          <div style={{ fontSize: 22, fontWeight: 700, color: Number(a.balance) >= 0 ? "#34d399" : "#f87171" }}>
+            {fmt(Number(a.balance))}
+          </div>
+        </div>
+      </div>
+      {/* Wraps: investment accounts carry a fourth button that would
+          otherwise push Delete off the card. */}
+      <div style={{ display: "flex", gap: 8, marginTop: 16, flexWrap: "wrap" }}>
+        <button className="glass-btn glass-btn-ghost" style={{ padding: "6px 12px", fontSize: 13, whiteSpace: "nowrap" }} onClick={() => navigate(`/transactions?accountId=${a.id}`)}>Transactions</button>
+        {a.type === "INVESTMENT" && (
+          <button className="glass-btn glass-btn-ghost" style={{ padding: "6px 12px", fontSize: 13, whiteSpace: "nowrap" }} onClick={() => setHoldingsFor(a)}>Holdings</button>
+        )}
+        {/* An investment account's balance is the value of its holdings, so there
+            is no bank balance to set by hand. */}
+        {a.type !== "INVESTMENT" && (
+          <button
+            className="glass-btn glass-btn-ghost"
+            style={{ padding: "6px 12px", fontSize: 13, whiteSpace: "nowrap" }}
+            onClick={() => reconcile(a)}
+            disabled={recalculating === a.id}
+            title="Enter the balance your bank shows; the starting balance is derived from it"
+          >
+            {recalculating === a.id ? "…" : "€ Set balance"}
+          </button>
+        )}
+        <button
+          className="glass-btn glass-btn-ghost"
+          style={{ padding: "6px 12px", fontSize: 13, whiteSpace: "nowrap" }}
+          onClick={() => recalc(a)}
+          disabled={recalculating === a.id}
+          title={a.type === "INVESTMENT"
+            ? "Refresh the balance from the current value of the holdings"
+            : "Re-derive the balance from the starting balance plus recorded transactions"}
+        >
+          ↻
+        </button>
+        <button className="glass-btn glass-btn-ghost" style={{ padding: "6px 12px", fontSize: 13, whiteSpace: "nowrap" }} onClick={() => open(a)}>Edit</button>
+        <button className="glass-btn glass-btn-danger" style={{ padding: "6px 12px", fontSize: 13, whiteSpace: "nowrap" }} onClick={() => remove(a.id)}>Delete</button>
+      </div>
+    </GlassCard>
+  );
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
@@ -692,70 +818,37 @@ export default function Accounts() {
         </div>
       )}
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(280px,1fr))", gap: 16 }}>
-        {items.map((a) => (
-          <GlassCard key={a.id} style={{ borderLeft: `4px solid ${a.color}` }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-              <div>
-                <div style={{ fontSize: 16, fontWeight: 600 }}>{a.name}</div>
-                {a.institution && <div style={{ fontSize: 12, color: "rgba(255,255,255,0.4)", marginTop: 2 }}>{a.institution}</div>}
-                <span style={{ fontSize: 11, background: "rgba(255,255,255,0.08)", padding: "2px 8px", borderRadius: 6, marginTop: 6, display: "inline-block", color: "rgba(255,255,255,0.5)" }}>
-                  {TYPES.find(t => t.value === a.type)?.label ?? a.type} · {a.currency}
-                </span>
-                {a.iban && (
-                  <div style={{ fontSize: 11, color: "rgba(255,255,255,0.35)", marginTop: 4, fontFamily: "monospace", letterSpacing: "0.05em" }}>
-                    {a.iban.replace(/\s/g, "").slice(0, -4).replace(/./g, "•").replace(/(.{4})/g, "$1 ").trim() + " " + a.iban.replace(/\s/g, "").slice(-4)}
+      {items.length === 0 ? (
+        <div style={{ color: "rgba(255,255,255,0.3)", padding: "60px 0", textAlign: "center" }}>
+          No accounts yet. Add your first bank account to get started.
+        </div>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 22 }}>
+          {hasGroups && (
+            <div style={{ fontSize: 12, color: "rgba(255,255,255,0.35)" }}>
+              Drag <span style={{ color: "rgba(255,255,255,0.5)" }}>⠿</span> to reorder, or drop a card onto another group to move it there. Set a group in Edit.
+            </div>
+          )}
+          {groups.map((g) => {
+            const subtotal = g.accounts.reduce((s, a) => s + Number(a.balance), 0);
+            return (
+              <div key={g.name || "__ungrouped__"}>
+                {hasGroups && (
+                  <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 12, margin: "0 4px 10px", paddingBottom: 6, borderBottom: "1px solid rgba(255,255,255,0.08)" }}>
+                    <span style={{ fontSize: 13, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em", color: g.name ? "rgba(255,255,255,0.65)" : "rgba(255,255,255,0.3)" }}>
+                      {g.name || "Ungrouped"}
+                    </span>
+                    <span style={{ fontSize: 13, fontWeight: 600, color: subtotal >= 0 ? "#34d399" : "#f87171" }}>{fmt(subtotal)}</span>
                   </div>
                 )}
-              </div>
-              <div style={{ textAlign: "right" }}>
-                <div style={{ fontSize: 22, fontWeight: 700, color: Number(a.balance) >= 0 ? "#34d399" : "#f87171" }}>
-                  {fmt(Number(a.balance))}
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(280px,1fr))", gap: 16 }}>
+                  {g.accounts.map((a) => renderCard(a))}
                 </div>
               </div>
-            </div>
-            {/* Wraps: investment accounts carry a fourth button that would
-                otherwise push Delete off the card. */}
-            <div style={{ display: "flex", gap: 8, marginTop: 16, flexWrap: "wrap" }}>
-              <button className="glass-btn glass-btn-ghost" style={{ padding: "6px 12px", fontSize: 13, whiteSpace: "nowrap" }} onClick={() => navigate(`/transactions?accountId=${a.id}`)}>Transactions</button>
-              {a.type === "INVESTMENT" && (
-                <button className="glass-btn glass-btn-ghost" style={{ padding: "6px 12px", fontSize: 13, whiteSpace: "nowrap" }} onClick={() => setHoldingsFor(a)}>Holdings</button>
-              )}
-              {/* An investment account's balance is the value of its holdings,
-                  so there is no bank balance to set by hand. */}
-              {a.type !== "INVESTMENT" && (
-                <button
-                  className="glass-btn glass-btn-ghost"
-                  style={{ padding: "6px 12px", fontSize: 13, whiteSpace: "nowrap" }}
-                  onClick={() => reconcile(a)}
-                  disabled={recalculating === a.id}
-                  title="Enter the balance your bank shows; the starting balance is derived from it"
-                >
-                  {recalculating === a.id ? "…" : "€ Set balance"}
-                </button>
-              )}
-              <button
-                className="glass-btn glass-btn-ghost"
-                style={{ padding: "6px 12px", fontSize: 13, whiteSpace: "nowrap" }}
-                onClick={() => recalc(a)}
-                disabled={recalculating === a.id}
-                title={a.type === "INVESTMENT"
-                  ? "Refresh the balance from the current value of the holdings"
-                  : "Re-derive the balance from the starting balance plus recorded transactions"}
-              >
-                ↻
-              </button>
-              <button className="glass-btn glass-btn-ghost" style={{ padding: "6px 12px", fontSize: 13, whiteSpace: "nowrap" }} onClick={() => open(a)}>Edit</button>
-              <button className="glass-btn glass-btn-danger" style={{ padding: "6px 12px", fontSize: 13, whiteSpace: "nowrap" }} onClick={() => remove(a.id)}>Delete</button>
-            </div>
-          </GlassCard>
-        ))}
-        {items.length === 0 && (
-          <div style={{ color: "rgba(255,255,255,0.3)", gridColumn: "1/-1", padding: "60px 0", textAlign: "center" }}>
-            No accounts yet. Add your first bank account to get started.
-          </div>
-        )}
-      </div>
+            );
+          })}
+        </div>
+      )}
 
       {holdingsFor && (
         <HoldingsModal account={holdingsFor} onClose={() => setHoldingsFor(null)} onChanged={load} />
@@ -793,6 +886,15 @@ export default function Accounts() {
               <label style={labelStyle}>
                 Institution <span style={{ color: "rgba(255,255,255,0.3)", fontWeight: 400 }}>(optional)</span>
                 <input className="glass-input" style={fieldStyle} placeholder="e.g. ING Bank" value={form.institution} onChange={(e) => setForm({ ...form, institution: e.target.value })} />
+              </label>
+
+              <label style={labelStyle}>
+                Group <span style={{ color: "rgba(255,255,255,0.3)", fontWeight: 400 }}>(optional — accounts with the same group are shown together)</span>
+                <input className="glass-input" style={fieldStyle} placeholder="e.g. Daily, Savings, Business" list="account-groups"
+                  value={form.groupName} onChange={(e) => setForm({ ...form, groupName: e.target.value })} />
+                <datalist id="account-groups">
+                  {groupNames.map((g) => <option key={g} value={g} />)}
+                </datalist>
               </label>
 
               <label style={labelStyle}>
