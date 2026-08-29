@@ -88,7 +88,7 @@ To actually get Watchtower auto-updates, images must be published (GitHub Action
 
 `backend/package.json` `version` is the **single source of truth** — bump it on
 every meaningful change (keep `frontend/package.json` in sync for tidiness).
-Currently **1.26.1**.
+Currently **1.27.0**.
 
 - `GET /version` → `{ version, buildTime }` (authenticated)
 - `GET /version/check` → compares against the `version` in `backend/package.json`
@@ -488,6 +488,29 @@ deliberately nulls the category on its transactions.
   account.
 - Import logic (`backend/src/routes/import.js`) upserts on that key. It does **not**
   recalculate account balance; `POST /accounts/:id/recalculate` does that.
+
+## Dashboard widgets
+
+The dashboard (`Dashboard.jsx`) is a customisable widget grid — multiple named
+dashboards, drag-to-reorder, per-widget width (12-col grid), all persisted in
+`localStorage` (`fintrack_dashboards_v2`). Widgets are added from a picker;
+`WIDGET_META` is the catalog, `WidgetContent` routes a type to its component.
+Data comes from `GET /stats/overview` (which returns the full account rows,
+including `type` and `groupName`) and `GET /stats/monthly`.
+
+- **Account Group widget** (`multi: true`, so several can coexist) totals a chosen
+  set of accounts. It selects **by group or by account** (`resolveGroupAccounts`):
+  picking groups (`config.groupNames`, multi) is **dynamic** — an account later
+  added to that group is included automatically — while picking accounts
+  (`config.accountIds`) is fixed. Empty = all accounts. Group mode auto-labels the
+  widget after the chosen groups until the label is edited. (v1.27.0)
+- **Investments widget** (v1.27.0): total value of INVESTMENT accounts plus a value
+  chart per account, reusing `GET /holdings/history` — so it covers ticker-priced
+  and manually-valued (fund/pension) accounts alike. The charts the user asked
+  "where do I see them" also live in the Holdings modal.
+- **Other v1.27.0 widgets**: Money Lent (outstanding, from `/loans/summary`),
+  Upcoming Subscriptions (active recurring by next date + a ~/month estimate),
+  Savings Rate ((income−expenses)/income over the range).
 
 ## Dashboard time range
 

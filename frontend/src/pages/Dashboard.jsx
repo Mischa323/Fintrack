@@ -1,9 +1,9 @@
 import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
-import { stats, transactions as txApi, goals as goalsApi } from "../api/client";
+import { stats, transactions as txApi, goals as goalsApi, holdings as holdingsApi, loans as loansApi, recurring as recurringApi } from "../api/client";
 import GlassCard from "../components/GlassCard";
 import {
-  BarChart, Bar, PieChart, Pie, Cell,
+  BarChart, Bar, PieChart, Pie, Cell, AreaChart, Area,
   XAxis, YAxis, Tooltip, ResponsiveContainer,
 } from "recharts";
 
@@ -29,6 +29,10 @@ const WIDGET_META = {
   "accounts":         { label: "Account Balances",     icon: "🏦", defaultCols: 12 },
   "recent-tx":        { label: "Recent Transactions",  icon: "📋", defaultCols: 6 },
   "goals":            { label: "Goals",                icon: "🎯", defaultCols: 6 },
+  "investments":      { label: "Investments",          icon: "📈", defaultCols: 6 },
+  "loans":            { label: "Money Lent",           icon: "🤝", defaultCols: 3 },
+  "recurring-upcoming": { label: "Upcoming Subscriptions", icon: "🔁", defaultCols: 6 },
+  "savings-rate":     { label: "Savings Rate",         icon: "🐖", defaultCols: 3 },
   "account-group":   { label: "Account Group",        icon: "🗂", defaultCols: 3, multi: true },
 };
 
@@ -348,11 +352,23 @@ function GoalsWidgetContent() {
   );
 }
 
+// Resolve which accounts a group widget covers. Selecting groups is dynamic — a
+// new account added to a chosen group shows up automatically — while selecting
+// individual accounts is fixed. Nothing selected means every account.
+function resolveGroupAccounts(accounts, config = {}) {
+  if (config.groupNames?.length) {
+    return accounts.filter((a) => config.groupNames.includes(a.groupName || ""));
+  }
+  if (config.accountIds?.length) {
+    return accounts.filter((a) => config.accountIds.includes(a.id));
+  }
+  return accounts;
+}
+
 function AccountGroupContent({ widget, overview }) {
   const { config = {} } = widget;
   const allAccounts = overview?.accounts || [];
-  const selectedIds = config.accountIds;
-  const filtered = selectedIds?.length ? allAccounts.filter(a => selectedIds.includes(a.id)) : allAccounts;
+  const filtered = resolveGroupAccounts(allAccounts, config);
   const total = filtered.reduce((sum, a) => sum + Number(a.balance), 0);
   const color = config.color || "#818cf8";
   const label = config.label || "Account Group";
@@ -379,27 +395,53 @@ function AccountGroupContent({ widget, overview }) {
 const PRESET_COLORS = ["#818cf8", "#34d399", "#60a5fa", "#f87171", "#fbbf24", "#a78bfa", "#f472b6", "#22d3ee"];
 
 function AccountGroupConfigModal({ initialConfig = {}, accounts = [], onSave, onCancel }) {
+  const groupNames = [...new Set(accounts.map(a => a.groupName).filter(Boolean))];
+  const [mode, setMode] = useState(initialConfig.groupNames?.length || (initialConfig.accountIds == null && groupNames.length) ? "group" : "account");
   const [label, setLabel] = useState(initialConfig.label || "Account Group");
+  const [labelTouched, setLabelTouched] = useState(!!initialConfig.label);
+  const [selectedGroups, setSelectedGroups] = useState(initialConfig.groupNames || []);
   const [selectedIds, setSelectedIds] = useState(
     initialConfig.accountIds?.length ? initialConfig.accountIds : accounts.map(a => a.id)
   );
   const [color, setColor] = useState(initialConfig.color || "#818cf8");
   const [showIndividual, setShowIndividual] = useState(initialConfig.showIndividual !== false);
 
-  const selected = accounts.filter(a => selectedIds.includes(a.id));
-  const total = selected.reduce((sum, a) => sum + Number(a.balance), 0);
-
+  const toggleGroup = (g) =>
+    setSelectedGroups(prev => prev.includes(g) ? prev.filter(x => x !== g) : [...prev, g]);
   const toggleAccount = (id) =>
     setSelectedIds(prev => prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]);
 
+  // Which accounts the current selection covers, for the live total preview.
+  const selected = mode === "group"
+    ? accounts.filter(a => selectedGroups.includes(a.groupName || ""))
+    : accounts.filter(a => selectedIds.includes(a.id));
+  const total = selected.reduce((sum, a) => sum + Number(a.balance), 0);
+
+  // Auto-name the widget after the chosen groups until the user edits the label.
+  const effectiveLabel = labelTouched ? label : (mode === "group" && selectedGroups.length ? selectedGroups.join(" + ") : label);
+
+  const save = () => onSave(
+    mode === "group"
+      ? { label: effectiveLabel, groupNames: selectedGroups, color, showIndividual }
+      : { label: effectiveLabel, accountIds: selectedIds, color, showIndividual }
+  );
+
+  const tab = (id, text) => (
+    <button onClick={() => setMode(id)} style={{
+      flex: 1, padding: "8px", borderRadius: 8, border: "none", cursor: "pointer", fontSize: 13, fontWeight: 600,
+      background: mode === id ? "rgba(129,140,248,0.3)" : "transparent",
+      color: mode === id ? "#c7d2fe" : "rgba(255,255,255,0.5)",
+    }}>{text}</button>
+  );
+
   return (
     <div style={{ position: "fixed", inset: 0, zIndex: 1000, background: "rgba(0,0,0,0.7)", backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center" }}>
-      <div className="glass-strong" style={{ width: 420, maxWidth: "90vw", padding: 28, borderRadius: 20 }}>
+      <div className="glass-strong" style={{ width: 420, maxWidth: "90vw", padding: 28, borderRadius: 20, maxHeight: "90vh", overflowY: "auto" }}>
         <h3 style={{ margin: "0 0 20px", fontSize: 17, fontWeight: 700 }}>Configure Account Group</h3>
 
         <div style={{ marginBottom: 16 }}>
           <div style={{ fontSize: 12, color: "rgba(255,255,255,0.5)", fontWeight: 500, marginBottom: 6 }}>Widget Label</div>
-          <input className="glass-input" value={label} onChange={e => setLabel(e.target.value)}
+          <input className="glass-input" value={effectiveLabel} onChange={e => { setLabel(e.target.value); setLabelTouched(true); }}
             style={{ width: "100%", padding: "9px 13px", boxSizing: "border-box" }} />
         </div>
 
@@ -414,30 +456,66 @@ function AccountGroupConfigModal({ initialConfig = {}, accounts = [], onSave, on
           </div>
         </div>
 
-        <div style={{ marginBottom: 16 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-            <div style={{ fontSize: 12, color: "rgba(255,255,255,0.5)", fontWeight: 500 }}>
-              Accounts ({selectedIds.length}/{accounts.length})
-            </div>
-            <button className="glass-btn glass-btn-ghost" style={{ padding: "3px 10px", fontSize: 11 }}
-              onClick={() => setSelectedIds(selectedIds.length === accounts.length ? [] : accounts.map(a => a.id))}>
-              {selectedIds.length === accounts.length ? "Deselect all" : "Select all"}
-            </button>
-          </div>
-          <div style={{ maxHeight: 180, overflowY: "auto", display: "flex", flexDirection: "column", gap: 6 }}>
-            {accounts.length === 0
-              ? <div style={{ color: "rgba(255,255,255,0.3)", fontSize: 13, padding: "12px 0" }}>No accounts found</div>
-              : accounts.map(a => (
-                <label key={a.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 10px", borderRadius: 8, background: "rgba(255,255,255,0.04)", cursor: "pointer" }}>
-                  <input type="checkbox" checked={selectedIds.includes(a.id)} onChange={() => toggleAccount(a.id)} />
-                  <div style={{ width: 3, height: 20, borderRadius: 2, background: a.color, flexShrink: 0 }} />
-                  <span style={{ flex: 1, fontSize: 13 }}>{a.name}</span>
-                  <span style={{ fontSize: 12, color: Number(a.balance) >= 0 ? "#34d399" : "#f87171", fontWeight: 600 }}>{fmt(Number(a.balance))}</span>
-                </label>
-              ))
-            }
-          </div>
+        {/* Choose accounts by group (dynamic) or one by one */}
+        <div style={{ display: "flex", gap: 4, padding: 4, borderRadius: 10, background: "rgba(255,255,255,0.05)", marginBottom: 14 }}>
+          {tab("group", "By group")}
+          {tab("account", "By account")}
         </div>
+
+        {mode === "group" ? (
+          <div style={{ marginBottom: 16 }}>
+            <div style={{ fontSize: 12, color: "rgba(255,255,255,0.5)", fontWeight: 500, marginBottom: 8 }}>
+              Groups ({selectedGroups.length} selected — pick one or more)
+            </div>
+            {groupNames.length === 0 ? (
+              <div style={{ color: "rgba(255,255,255,0.3)", fontSize: 13, padding: "10px 0", lineHeight: 1.5 }}>
+                No groups yet. Give your accounts a group on the Accounts page (in Edit), then pick them here.
+              </div>
+            ) : (
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                {groupNames.map(g => {
+                  const active = selectedGroups.includes(g);
+                  const groupTotal = accounts.filter(a => (a.groupName || "") === g).reduce((s, a) => s + Number(a.balance), 0);
+                  return (
+                    <button key={g} onClick={() => toggleGroup(g)} style={{
+                      padding: "7px 14px", borderRadius: 999, cursor: "pointer", fontSize: 13,
+                      border: `1px solid ${active ? "rgba(129,140,248,0.6)" : "rgba(255,255,255,0.12)"}`,
+                      background: active ? "rgba(129,140,248,0.25)" : "rgba(255,255,255,0.04)",
+                      color: active ? "#c7d2fe" : "rgba(255,255,255,0.6)",
+                    }}>
+                      {g} <span style={{ opacity: 0.6, marginLeft: 4 }}>{fmt(groupTotal)}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        ) : (
+          <div style={{ marginBottom: 16 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+              <div style={{ fontSize: 12, color: "rgba(255,255,255,0.5)", fontWeight: 500 }}>
+                Accounts ({selectedIds.length}/{accounts.length})
+              </div>
+              <button className="glass-btn glass-btn-ghost" style={{ padding: "3px 10px", fontSize: 11 }}
+                onClick={() => setSelectedIds(selectedIds.length === accounts.length ? [] : accounts.map(a => a.id))}>
+                {selectedIds.length === accounts.length ? "Deselect all" : "Select all"}
+              </button>
+            </div>
+            <div style={{ maxHeight: 180, overflowY: "auto", display: "flex", flexDirection: "column", gap: 6 }}>
+              {accounts.length === 0
+                ? <div style={{ color: "rgba(255,255,255,0.3)", fontSize: 13, padding: "12px 0" }}>No accounts found</div>
+                : accounts.map(a => (
+                  <label key={a.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 10px", borderRadius: 8, background: "rgba(255,255,255,0.04)", cursor: "pointer" }}>
+                    <input type="checkbox" checked={selectedIds.includes(a.id)} onChange={() => toggleAccount(a.id)} />
+                    <div style={{ width: 3, height: 20, borderRadius: 2, background: a.color, flexShrink: 0 }} />
+                    <span style={{ flex: 1, fontSize: 13 }}>{a.name}</span>
+                    <span style={{ fontSize: 12, color: Number(a.balance) >= 0 ? "#34d399" : "#f87171", fontWeight: 600 }}>{fmt(Number(a.balance))}</span>
+                  </label>
+                ))
+              }
+            </div>
+          </div>
+        )}
 
         <label style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 20, cursor: "pointer" }}>
           <input type="checkbox" checked={showIndividual} onChange={e => setShowIndividual(e.target.checked)} />
@@ -445,16 +523,147 @@ function AccountGroupConfigModal({ initialConfig = {}, accounts = [], onSave, on
         </label>
 
         <div style={{ background: "rgba(255,255,255,0.04)", borderRadius: 12, padding: "12px 16px", marginBottom: 24, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <span style={{ fontSize: 12, color: "rgba(255,255,255,0.5)" }}>Combined total ({selectedIds.length} accounts)</span>
+          <span style={{ fontSize: 12, color: "rgba(255,255,255,0.5)" }}>Combined total ({selected.length} accounts)</span>
           <span style={{ fontSize: 20, fontWeight: 700, color }}>{fmt(total)}</span>
         </div>
 
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
           <button className="glass-btn glass-btn-ghost" onClick={onCancel}>Cancel</button>
-          <button className="glass-btn glass-btn-primary" onClick={() => onSave({ label, accountIds: selectedIds, color, showIndividual })}>
-            Save widget
-          </button>
+          <button className="glass-btn glass-btn-primary" onClick={save}>Save widget</button>
         </div>
+      </div>
+    </div>
+  );
+}
+
+// Investment value over time, right on the dashboard — pick an account and range.
+// Uses the same /holdings/history endpoint as the Holdings modal, so it works for
+// ticker-priced accounts and manually-valued (fund/pension) ones alike.
+function InvestmentsWidgetContent({ overview }) {
+  const invAccounts = (overview?.accounts || []).filter(a => a.type === "INVESTMENT");
+  const [sel, setSel] = useState("");
+  const [range, setRange] = useState("6mo");
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => { if (!sel && invAccounts.length) setSel(invAccounts[0].id); }, [invAccounts, sel]);
+  useEffect(() => {
+    if (!sel) return;
+    let live = true; setLoading(true);
+    holdingsApi.history(sel, range)
+      .then(r => { if (live) { setData(r); setLoading(false); } })
+      .catch(() => { if (live) { setData(null); setLoading(false); } });
+    return () => { live = false; };
+  }, [sel, range]);
+
+  const totalValue = invAccounts.reduce((s, a) => s + Number(a.balance), 0);
+  const series = data?.series || [];
+  const cur = data?.currency || invAccounts.find(a => a.id === sel)?.currency || "EUR";
+  const money = (n) => new Intl.NumberFormat("nl-NL", { style: "currency", currency: cur, maximumFractionDigits: 0 }).format(n);
+
+  if (invAccounts.length === 0) {
+    return (
+      <div>
+        <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 8 }}>Investments</div>
+        <div style={{ color: "rgba(255,255,255,0.3)", fontSize: 13 }}>No investment accounts yet.</div>
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", flexWrap: "wrap", gap: 8, marginBottom: 12 }}>
+        <div style={{ fontSize: 14, fontWeight: 600 }}>Investments</div>
+        <div style={{ fontSize: 18, fontWeight: 700, color: "#34d399" }}>{fmt(totalValue)}</div>
+      </div>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
+        <select className="glass-input" style={{ padding: "5px 10px", fontSize: 12, flex: "1 1 140px" }} value={sel} onChange={e => setSel(e.target.value)}>
+          {invAccounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+        </select>
+        <div style={{ display: "flex", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, overflow: "hidden" }}>
+          {[["1mo", "1M"], ["6mo", "6M"], ["1y", "1Y"], ["max", "Max"]].map(([v, l]) => (
+            <button key={v} onClick={() => setRange(v)} style={{ padding: "5px 10px", fontSize: 12, border: "none", cursor: "pointer", background: range === v ? "rgba(99,102,241,0.3)" : "transparent", color: range === v ? "#c7d2fe" : "rgba(255,255,255,0.45)" }}>{l}</button>
+          ))}
+        </div>
+      </div>
+      <div style={{ height: 160 }}>
+        {loading ? <div style={{ color: "rgba(255,255,255,0.35)", fontSize: 13, textAlign: "center", padding: "50px 0" }}>Loading…</div>
+          : series.length < 2 ? <div style={{ color: "rgba(255,255,255,0.3)", fontSize: 13, textAlign: "center", padding: "50px 0" }}>Not enough history yet — it fills in over time.</div>
+          : (
+            <ResponsiveContainer width="100%" height="100%">
+              <AreaChart data={series} margin={{ top: 4, right: 4, bottom: 0, left: 0 }}>
+                <defs><linearGradient id="invFill" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#34d399" stopOpacity={0.35} /><stop offset="100%" stopColor="#34d399" stopOpacity={0} /></linearGradient></defs>
+                <XAxis dataKey="date" tickFormatter={d => new Date(d).toLocaleDateString("nl-NL", { month: "short" })} tick={{ fill: "#64748b", fontSize: 11 }} axisLine={false} tickLine={false} minTickGap={40} />
+                <YAxis tick={{ fill: "#64748b", fontSize: 11 }} axisLine={false} tickLine={false} width={46} tickFormatter={v => Math.abs(v) >= 1000 ? `${(v / 1000).toFixed(0)}k` : v} domain={["auto", "auto"]} />
+                <Tooltip formatter={v => money(v)} labelFormatter={l => new Date(l).toLocaleDateString("nl-NL")} contentStyle={{ background: "#0f172a", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, fontSize: 12 }} />
+                <Area type="monotone" dataKey="value" stroke="#34d399" strokeWidth={2} fill="url(#invFill)" />
+              </AreaChart>
+            </ResponsiveContainer>
+          )}
+      </div>
+    </div>
+  );
+}
+
+function LoansWidgetContent() {
+  const navigate = useNavigate();
+  const [sum, setSum] = useState(null);
+  useEffect(() => { loansApi.summary().then(setSum).catch(() => {}); }, []);
+  return (
+    <div onClick={() => navigate("/loans")} style={{ background: "rgba(251,191,36,0.1)", borderRadius: 16, padding: "20px 22px", height: "100%", boxSizing: "border-box", cursor: "pointer" }}>
+      <div style={{ fontSize: 12, color: "rgba(255,255,255,0.5)", marginBottom: 10, fontWeight: 500 }}>Still owed to you</div>
+      <div style={{ fontSize: 28, fontWeight: 700, color: "#fbbf24" }}>{sum ? fmt(sum.totalOutstanding) : "—"}</div>
+      {sum && <div style={{ fontSize: 12, color: "rgba(255,255,255,0.4)", marginTop: 8 }}>{fmt(sum.totalRepaid)} back of {fmt(sum.totalLent)} · {sum.people} {sum.people === 1 ? "person" : "people"}</div>}
+    </div>
+  );
+}
+
+function UpcomingRecurringContent() {
+  const navigate = useNavigate();
+  const [items, setItems] = useState([]);
+  useEffect(() => { recurringApi.list().then(r => setItems(r.filter(x => x.active))).catch(() => {}); }, []);
+  const upcoming = [...items].sort((a, b) => new Date(a.nextDate) - new Date(b.nextDate)).slice(0, 5);
+  const perMonth = { DAILY: 30, WEEKLY: 4.33, BIWEEKLY: 2.17, MONTHLY: 1, QUARTERLY: 1 / 3, YEARLY: 1 / 12 };
+  const monthlyTotal = items.reduce((s, r) => s + (r.type === "EXPENSE" ? Number(r.amount) * (perMonth[r.frequency] || 1) : 0), 0);
+  return (
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 14 }}>
+        <div style={{ fontSize: 14, fontWeight: 600 }}>Upcoming Subscriptions</div>
+        <div style={{ fontSize: 12, color: "rgba(255,255,255,0.5)" }}>~{fmt(monthlyTotal)}/mo</div>
+      </div>
+      {upcoming.length === 0
+        ? <div style={{ color: "rgba(255,255,255,0.3)", fontSize: 13 }}>No active subscriptions</div>
+        : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {upcoming.map(r => (
+              <div key={r.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 0", borderBottom: "1px solid rgba(255,255,255,0.05)" }}>
+                <div>
+                  <div style={{ fontSize: 13, fontWeight: 500 }}>{r.description}</div>
+                  <div style={{ fontSize: 11, color: "rgba(255,255,255,0.35)", marginTop: 2 }}>{r.frequency.toLowerCase()} · next {new Date(r.nextDate).toLocaleDateString("nl-NL")}</div>
+                </div>
+                <div style={{ fontWeight: 600, fontSize: 14, color: r.type === "INCOME" ? "#34d399" : "#f87171" }}>{r.type === "INCOME" ? "+" : "-"}{fmt(Number(r.amount))}</div>
+              </div>
+            ))}
+            <button onClick={() => navigate("/recurring")} style={{ background: "none", border: "none", color: "rgba(129,140,248,0.8)", fontSize: 13, cursor: "pointer", textAlign: "left", padding: "6px 0 0" }}>Manage →</button>
+          </div>
+        )}
+    </div>
+  );
+}
+
+function SavingsRateContent({ overview }) {
+  const income = overview?.totalIncome || 0;
+  const expenses = overview?.totalExpenses || 0;
+  const rate = income > 0 ? ((income - expenses) / income) * 100 : null;
+  const good = rate != null && rate >= 0;
+  return (
+    <div style={{ background: "rgba(52,211,153,0.10)", borderRadius: 16, padding: "20px 22px", height: "100%", boxSizing: "border-box" }}>
+      <div style={{ fontSize: 12, color: "rgba(255,255,255,0.5)", marginBottom: 10, fontWeight: 500 }}>Savings Rate</div>
+      <div style={{ fontSize: 28, fontWeight: 700, color: rate == null ? "rgba(255,255,255,0.4)" : good ? "#34d399" : "#f87171" }}>
+        {rate == null ? "—" : `${rate.toFixed(0)}%`}
+      </div>
+      <div style={{ fontSize: 12, color: "rgba(255,255,255,0.4)", marginTop: 8 }}>
+        {rate == null ? "No income in range" : `${fmt(income - expenses)} kept of ${fmt(income)}`}
       </div>
     </div>
   );
@@ -462,12 +671,16 @@ function AccountGroupConfigModal({ initialConfig = {}, accounts = [], onSave, on
 
 function WidgetContent({ widget, overview, monthly }) {
   const { type } = widget;
+  if (type === "savings-rate")       return <SavingsRateContent overview={overview} />;
   if (type.startsWith("stat-"))      return <StatWidgetContent type={type} overview={overview} />;
   if (type === "chart-monthly")      return <MonthlyChartContent monthly={monthly} />;
   if (type === "chart-categories")   return <CategoryChartContent overview={overview} />;
   if (type === "accounts")           return <AccountsWidgetContent overview={overview} />;
   if (type === "recent-tx")          return <RecentTxContent />;
   if (type === "goals")              return <GoalsWidgetContent />;
+  if (type === "investments")        return <InvestmentsWidgetContent overview={overview} />;
+  if (type === "loans")              return <LoansWidgetContent />;
+  if (type === "recurring-upcoming") return <UpcomingRecurringContent />;
   if (type === "account-group")      return <AccountGroupContent widget={widget} overview={overview} />;
   return null;
 }
