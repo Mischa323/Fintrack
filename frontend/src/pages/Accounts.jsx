@@ -444,7 +444,7 @@ function HoldingsModal({ account, onClose, onChanged }) {
           </div>
         )}
 
-        {!loading && rows.length > 0 && (
+        {!loading && (rows.length > 0 || account.manualValue != null) && (
           <ValueHistoryChart accountId={account.id} currency={account.currency} />
         )}
 
@@ -452,8 +452,12 @@ function HoldingsModal({ account, onClose, onChanged }) {
           {loading ? (
             <div style={{ color: "rgba(255,255,255,0.35)", fontSize: 13 }}>Loading…</div>
           ) : rows.length === 0 ? (
-            <div style={{ color: "rgba(255,255,255,0.3)", fontSize: 13, padding: "24px 0", textAlign: "center" }}>
-              No positions yet. Add one below, or import a Revolut statement.
+            <div style={{ color: "rgba(255,255,255,0.3)", fontSize: 13, padding: "24px 0", textAlign: "center", lineHeight: 1.6 }}>
+              {account.manualValue != null ? (
+                <>This account is tracked by a hand-entered value of <strong style={{ color: "rgba(255,255,255,0.6)" }}>{money(Number(account.manualValue), account.currency)}</strong>.<br />Update it with <strong>€ Set value</strong> on the account card. The chart above builds up as you enter new values.</>
+              ) : (
+                <>No positions yet. Add one below, or import a Revolut statement.<br />No tradeable ticker (a fund or pension like Brand New Day)? Close this and use <strong>€ Set value</strong> to enter its worth by hand.</>
+              )}
             </div>
           ) : (
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
@@ -612,6 +616,31 @@ export default function Accounts() {
           + `${r.movements.toFixed(2)} from recorded transactions, `
           + `${r.openingBalance.toFixed(2)} from before them`
       );
+      load();
+    } catch (e) {
+      setRecalcMsg(`${account.name}: ${e.response?.data?.error || e.message}`);
+    } finally {
+      setRecalculating(null);
+    }
+  };
+
+  // For an investment account holding fund/pension products with no ticker to
+  // price (Brand New Day, a pension pot): enter its current worth by hand.
+  const setValue = async (account) => {
+    const entered = window.prompt(
+      `What is "${account.name}" worth now?\n\n`
+        + "For a fund or pension account with no tradeable holdings, enter the current value from your statement. Update it whenever you get a new statement.",
+      account.manualValue != null ? Number(account.manualValue).toFixed(2) : Number(account.balance).toFixed(2)
+    );
+    if (entered === null) return;
+    const value = Number(String(entered).replace(",", "."));
+    if (isNaN(value)) { setRecalcMsg(`"${entered}" is not a number`); return; }
+
+    setRecalculating(account.id);
+    setRecalcMsg(null);
+    try {
+      const r = await accountsApi.setValue(account.id, value);
+      setRecalcMsg(`${account.name}: value set to ${Number(r.balance).toFixed(2)}`);
       load();
     } catch (e) {
       setRecalcMsg(`${account.name}: ${e.response?.data?.error || e.message}`);
@@ -804,8 +833,21 @@ export default function Accounts() {
         {a.type === "INVESTMENT" && (
           <button className="glass-btn glass-btn-ghost" style={{ padding: "6px 12px", fontSize: 13, whiteSpace: "nowrap" }} onClick={() => setHoldingsFor(a)}>Holdings</button>
         )}
-        {/* An investment account's balance is the value of its holdings, so there
-            is no bank balance to set by hand. */}
+        {/* Funds/pensions with no ticker (Brand New Day, a pension pot) can't be
+            priced automatically, so their worth is entered by hand. */}
+        {a.type === "INVESTMENT" && (
+          <button
+            className="glass-btn glass-btn-ghost"
+            style={{ padding: "6px 12px", fontSize: 13, whiteSpace: "nowrap" }}
+            onClick={() => setValue(a)}
+            disabled={recalculating === a.id}
+            title="Enter the current worth by hand — for funds or pensions with no tradeable holdings"
+          >
+            {recalculating === a.id ? "…" : "€ Set value"}
+          </button>
+        )}
+        {/* An investment account's bank balance is the value of its holdings, so
+            there is no bank balance to set by hand. */}
         {a.type !== "INVESTMENT" && (
           <button
             className="glass-btn glass-btn-ghost"

@@ -88,7 +88,7 @@ To actually get Watchtower auto-updates, images must be published (GitHub Action
 
 `backend/package.json` `version` is the **single source of truth** — bump it on
 every meaningful change (keep `frontend/package.json` in sync for tidiness).
-Currently **1.25.0**.
+Currently **1.26.0**.
 
 - `GET /version` → `{ version, buildTime }` (authenticated)
 - `GET /version/check` → compares against the `version` in `backend/package.json`
@@ -343,6 +343,26 @@ unrealised gain vs avgCost is ≤ −threshold) to every holding in `GET /holdin
 `PUT /holdings/:id` takes `lossAlertPercent` (absolute value; `""`/`null` clears).
 The Holdings table shows a 🔔/🔕 toggle per row and a red "past −X% alert" marker
 when triggered. Nothing is pushed anywhere — the alert is surfaced in the UI.
+
+## Manually-valued investment accounts (funds/pensions) (v1.26.0)
+
+Some investment accounts hold products with **no tradeable ticker** — Brand New
+Day, a pension pot — so their worth can't be priced from Yahoo. `Account.manualValue`
+lets the user enter that worth by hand.
+
+- `recalculateAccountValue` (services/quotes.js) seeds `total` with `manualValue`
+  then adds any priced holdings, so a holding-less account is worth exactly the
+  hand-entered number, and the ↻ button keeps it there instead of resetting to 0.
+- `POST /accounts/:id/value { value }` (investment accounts only) sets `manualValue`,
+  recalculates, and writes a daily `AccountValueSnapshot`. UI: a "€ Set value"
+  button on the investment account card (the ticker-based flow, "Set balance", is
+  still blocked/hidden for investment accounts).
+- **Value chart still works**: `accountValueHistory` can't reconstruct history from
+  prices for these, so when an account has no holdings it returns the snapshot
+  series instead — a forward-only chart that fills in as values are entered. The
+  chart renders in the Holdings modal when the account has holdings **or** a
+  `manualValue`. `AccountValueSnapshot` is `@@unique([accountId, date])`, upserted
+  per UTC day.
 
 ## Money lent (loans to people)
 

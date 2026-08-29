@@ -120,12 +120,14 @@ async function recalculateAccountValue(accountId, rate) {
   const resolve = rate || (await makeRateResolver());
   const account = await prisma.account.findUnique({
     where: { id: accountId },
-    select: { id: true, currency: true },
+    select: { id: true, currency: true, manualValue: true },
   });
   if (!account) return null;
 
   const holdings = await prisma.holding.findMany({ where: { accountId } });
-  let total = 0;
+  // A hand-entered value for fund/pension products with no ticker. Added to any
+  // priced holdings, so a holding-less account is worth exactly this.
+  let total = account.manualValue != null ? Number(account.manualValue) : 0;
   let unconverted = 0;
 
   for (const h of holdings) {

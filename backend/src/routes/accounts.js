@@ -2,6 +2,19 @@ const express = require("express");
 const { PrismaClient } = require("@prisma/client");
 const { normaliseIban } = require("../services/iban");
 const { recalculateBalance, reconcileToBalance, sumTransactions } = require("../services/accountBalance");
+const { recalculateAccountValue } = require("../services/quotes");
+
+// One snapshot per account per day (UTC), so the value chart of a manually
+// tracked investment account builds forward as its worth is entered.
+async function recordSnapshot(accountId, value) {
+  const now = new Date();
+  const date = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+  await prisma.accountValueSnapshot.upsert({
+    where: { accountId_date: { accountId, date } },
+    update: { value },
+    create: { accountId, date, value },
+  });
+}
 
 const router = express.Router();
 const prisma = new PrismaClient();
@@ -85,11 +98,32 @@ router.post("/:id/reconcile", async (req, res) => {
   const account = await prisma.account.findUnique({ where: { id: req.params.id }, select: { type: true } });
   if (account?.type === "INVESTMENT") {
     return res.status(400).json({
-      error: "An investment account's balance is the value of its holdings — use ↻ to refresh it from the latest prices, don't set it by hand.",
+      error: "An investment account's balance comes from its holdings. If it has no tradeable holdings (a fund or pension), use \"Set value\" to enter its current worth by hand.",
     });
   }
   const result = await reconcileToBalance(req.params.id, Number(balance));
   res.json(result);
+});
+
+// Set the hand-entered worth of an investment account that holds fund/pension
+// products with no ticker to look up. Adds a dated snapshot so the value chart
+// builds over time.
+router.post("/:id/value", async (req, res) => {
+  const { value } = req.body;
+  if (value === undefined || isNaN(Number(value))) {
+    return res.status(400).json({ error: "A numeric value is required" });
+  }
+  const account = await prisma.account.findUnique({ where: { id: req.params.id }, select: { type: true } });
+  if (!account) return res.status(404).json({ error: "Account not found" });
+  if (account.type !== "INVESTMENT") {
+    return res.status(400).json({ error: "Only investment accounts have a manual value. Use \"Set balance\" for other accounts." });
+  }
+
+  await prisma.account.update({ where: { id: req.params.id }, data: { manualValue: Number(value) } });
+  const { balance } = await recalculateAccountValue(req.params.id);
+  await recordSnapshot(req.params.id, balance);
+  const updated = await prisma.account.findUnique({ where: { id: req.params.id } });
+  res.json({ ...updated, balance });
 });
 
 module.exports = router;

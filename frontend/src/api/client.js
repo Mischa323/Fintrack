@@ -32,6 +32,7 @@ export const accounts = {
   remove: (id) => api.delete(`/accounts/${id}`),
   recalculate: (id) => api.post(`/accounts/${id}/recalculate`).then((r) => r.data),
   reconcile: (id, balance) => api.post(`/accounts/${id}/reconcile`, { balance }).then((r) => r.data),
+  setValue: (id, value) => api.post(`/accounts/${id}/value`, { value }).then((r) => r.data),
   reorder: (ids) => api.put("/accounts/reorder", { ids }).then((r) => r.data),
 };
 

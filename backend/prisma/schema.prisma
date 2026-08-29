@@ -31,6 +31,11 @@ model Account {
   // shared heading (null = ungrouped).
   sortOrder    Int                    @default(0)
   groupName    String?
+  // For an investment account that holds fund/pension products with no tradeable
+  // ticker (Brand New Day, a pension pot): the current worth, entered by hand.
+  // recalculateAccountValue adds it to any priced holdings, so a holding-less
+  // account is simply worth this number.
+  manualValue  Decimal?
   createdAt    DateTime               @default(now())
   updatedAt    DateTime               @updatedAt
   transactions   Transaction[]          @relation("FromAccount")
@@ -39,6 +44,23 @@ model Account {
   goals          Goal[]
   holdings       Holding[]
   loans          Loan[]
+  valueSnapshots AccountValueSnapshot[]
+}
+
+// A dated record of what an account was worth. Used for the value chart of
+// investment accounts tracked by a manual value (fund/pension products), whose
+// history cannot be reconstructed from prices — so it is built forward, one
+// snapshot per day, as the value is updated.
+model AccountValueSnapshot {
+  id        String   @id @default(cuid())
+  accountId String
+  account   Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  date      DateTime
+  value     Decimal
+  createdAt DateTime @default(now())
+
+  @@unique([accountId, date])
+  @@index([accountId])
 }
 
 // An investment position. Revolut and other brokers expose no API for personal

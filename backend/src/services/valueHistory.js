@@ -13,6 +13,27 @@ const prisma = new PrismaClient();
 const CHART_URL = "https://query1.finance.yahoo.com/v8/finance/chart/";
 const FX_RANGE_URL = "https://api.frankfurter.app";
 const RANGES = { "1mo": "1mo", "3mo": "3mo", "6mo": "6mo", "1y": "1y", "2y": "2y", max: "max" };
+const RANGE_MONTHS = { "1mo": 1, "3mo": 3, "6mo": 6, "1y": 12, "2y": 24, max: 1200 };
+
+// The manually-tracked value chart is built from stored snapshots, not prices.
+function rangeStart(range) {
+  const months = RANGE_MONTHS[range] || 6;
+  const d = new Date();
+  d.setMonth(d.getMonth() - months);
+  return d;
+}
+
+async function snapshotHistory(accountId, range, currency) {
+  const snapshots = await prisma.accountValueSnapshot.findMany({
+    where: { accountId, date: { gte: rangeStart(range) } },
+    orderBy: { date: "asc" },
+  });
+  return {
+    series: snapshots.map((s) => ({ date: dayKey(s.date), value: Number(s.value) })),
+    currency,
+    errors: [],
+  };
+}
 
 async function getJson(url) {
   const controller = new AbortController();
@@ -89,13 +110,15 @@ async function accountValueHistory(accountId, range = "6mo") {
   });
   if (!account) return { series: [], errors: ["Account not found"] };
 
+  const accountCurrency = account.currency || "EUR";
+
   const holdings = await prisma.holding.findMany({
     where: { accountId },
     include: { trades: { orderBy: [{ opening: "desc" }, { date: "asc" }] } },
   });
-  if (holdings.length === 0) return { series: [], errors: [] };
-
-  const accountCurrency = account.currency || "EUR";
+  // No priced holdings: this is a manually-valued account (a fund or pension), so
+  // its chart comes from the snapshots recorded each time its value was entered.
+  if (holdings.length === 0) return snapshotHistory(accountId, range, accountCurrency);
   const errors = [];
 
   // Price history per symbol; the union of trading days is the chart's axis.
