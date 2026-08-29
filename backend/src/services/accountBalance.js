@@ -1,4 +1,5 @@
 const { PrismaClient } = require("@prisma/client");
+const { recalculateAccountValue } = require("./quotes");
 
 const prisma = new PrismaClient();
 
@@ -39,9 +40,19 @@ async function sumTransactions(accountId, afterDate = null) {
 async function recalculateBalance(accountId) {
   const account = await prisma.account.findUnique({
     where: { id: accountId },
-    select: { openingBalance: true, openingBalanceDate: true },
+    select: { type: true, openingBalance: true, openingBalanceDate: true },
   });
   if (!account) return null;
+
+  // An investment account's balance is the value of its holdings, not a sum of
+  // transactions — those are only transfers funding it. Delegating here keeps
+  // every caller correct at once: the accounts route, imports, and transfer
+  // removal all recalc through this function, and each used to clobber an
+  // investment balance with a meaningless transaction sum.
+  if (account.type === "INVESTMENT") {
+    const { balance } = await recalculateAccountValue(accountId);
+    return balance;
+  }
 
   const movements = await sumTransactions(accountId, account.openingBalanceDate || null);
   const balance = round(Number(account.openingBalance) + movements);
@@ -55,6 +66,15 @@ async function recalculateBalance(accountId) {
 // today leave the balance untouched; only transactions dated after today move
 // it. The opening balance is derived so the sum still lands on the entered value.
 async function reconcileToBalance(accountId, actualBalance) {
+  // An investment account has no bank balance to anchor to — it is worth its
+  // holdings. Ignore the figure and derive from holdings so a stray accounts.csv
+  // row (or any caller) cannot pin it to a wrong number.
+  const investment = await prisma.account.findUnique({ where: { id: accountId }, select: { type: true } });
+  if (investment?.type === "INVESTMENT") {
+    const { balance } = await recalculateAccountValue(accountId);
+    return { openingBalance: 0, openingBalanceDate: null, balance, movements: 0 };
+  }
+
   const now = new Date();
   const anchor = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 23, 59, 59, 999));
 

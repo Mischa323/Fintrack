@@ -35,22 +35,34 @@ router.delete("/:id", async (req, res) => {
   res.status(204).end();
 });
 
-// Recalculate account balance: openingBalance + recorded movements
+// Recalculate account balance. recalculateBalance derives an investment
+// account's balance from its holdings and every other account from
+// openingBalance + recorded movements, so this route stays simple.
 router.post("/:id/recalculate", async (req, res) => {
   const balance = await recalculateBalance(req.params.id);
   if (balance === null) return res.status(404).json({ error: "Account not found" });
   const account = await prisma.account.findUnique({ where: { id: req.params.id } });
-  // Movements that count toward the balance are only those after the checkpoint
-  const movements = await sumTransactions(req.params.id, account.openingBalanceDate || null);
+  // Movements that count toward the balance are only those after the checkpoint;
+  // an investment balance comes from holdings, so there are none to report.
+  const movements = account.type === "INVESTMENT"
+    ? 0
+    : await sumTransactions(req.params.id, account.openingBalanceDate || null);
   res.json({ ...account, balance, movements });
 });
 
 // Tell FinTrack what the bank actually shows; the opening balance is derived so
-// the recorded transactions add up to it.
+// the recorded transactions add up to it. An investment account's balance is the
+// value of its holdings, so there is nothing to set by hand.
 router.post("/:id/reconcile", async (req, res) => {
   const { balance } = req.body;
   if (balance === undefined || isNaN(Number(balance))) {
     return res.status(400).json({ error: "A numeric balance is required" });
+  }
+  const account = await prisma.account.findUnique({ where: { id: req.params.id }, select: { type: true } });
+  if (account?.type === "INVESTMENT") {
+    return res.status(400).json({
+      error: "An investment account's balance is the value of its holdings — use ↻ to refresh it from the latest prices, don't set it by hand.",
+    });
   }
   const result = await reconcileToBalance(req.params.id, Number(balance));
   res.json(result);

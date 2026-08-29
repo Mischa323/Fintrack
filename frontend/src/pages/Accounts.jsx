@@ -721,21 +721,27 @@ export default function Accounts() {
               {a.type === "INVESTMENT" && (
                 <button className="glass-btn glass-btn-ghost" style={{ padding: "6px 12px", fontSize: 13, whiteSpace: "nowrap" }} onClick={() => setHoldingsFor(a)}>Holdings</button>
               )}
-              <button
-                className="glass-btn glass-btn-ghost"
-                style={{ padding: "6px 12px", fontSize: 13, whiteSpace: "nowrap" }}
-                onClick={() => reconcile(a)}
-                disabled={recalculating === a.id}
-                title="Enter the balance your bank shows; the starting balance is derived from it"
-              >
-                {recalculating === a.id ? "…" : "€ Set balance"}
-              </button>
+              {/* An investment account's balance is the value of its holdings,
+                  so there is no bank balance to set by hand. */}
+              {a.type !== "INVESTMENT" && (
+                <button
+                  className="glass-btn glass-btn-ghost"
+                  style={{ padding: "6px 12px", fontSize: 13, whiteSpace: "nowrap" }}
+                  onClick={() => reconcile(a)}
+                  disabled={recalculating === a.id}
+                  title="Enter the balance your bank shows; the starting balance is derived from it"
+                >
+                  {recalculating === a.id ? "…" : "€ Set balance"}
+                </button>
+              )}
               <button
                 className="glass-btn glass-btn-ghost"
                 style={{ padding: "6px 12px", fontSize: 13, whiteSpace: "nowrap" }}
                 onClick={() => recalc(a)}
                 disabled={recalculating === a.id}
-                title="Re-derive the balance from the starting balance plus recorded transactions"
+                title={a.type === "INVESTMENT"
+                  ? "Refresh the balance from the current value of the holdings"
+                  : "Re-derive the balance from the starting balance plus recorded transactions"}
               >
                 ↻
               </button>

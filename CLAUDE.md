@@ -88,7 +88,7 @@ To actually get Watchtower auto-updates, images must be published (GitHub Action
 
 `backend/package.json` `version` is the **single source of truth** — bump it on
 every meaningful change (keep `frontend/package.json` in sync for tidiness).
-Currently **1.23.0**.
+Currently **1.23.1**.
 
 - `GET /version` → `{ version, buildTime }` (authenticated)
 - `GET /version/check` → compares against the `version` in `backend/package.json`
@@ -261,6 +261,14 @@ that actually changes daily.
   rather than failing the whole refresh.
 - `recalculateAccountValue()` sets an investment account's balance to
   Σ(quantity × lastPrice × fx), so the balance is derived, not typed in.
+- **`recalculateBalance()` delegates to it for INVESTMENT accounts** (v1.23.1).
+  Every balance recompute funnels through `recalculateBalance` — the ↻ button,
+  imports (`import.js`), and transfer removal. It used to sum transactions for
+  all types, so a transfer funding an investment account (or any import that
+  triggered a recalc) clobbered the holdings-derived balance with the transfer
+  total. Now investment accounts recompute from holdings there too, and
+  `reconcileToBalance` ("Set balance") ignores a typed figure for them (the UI
+  hides the button; the route returns 400).
 - Cron refreshes prices weekday mornings (`30 6 * * 1-5`).
 - Adding a position looks the price up immediately, so a bad ticker is rejected
   at entry instead of sitting at zero until the next refresh. European tickers
