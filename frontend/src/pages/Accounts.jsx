@@ -724,7 +724,40 @@ export default function Accounts() {
   const hasGroups = groups.some((g) => g.name);
   const groupNames = [...new Set(items.map((a) => a.groupName).filter(Boolean))];
 
-  const renderCard = (a) => (
+  // ── Up/down reordering ──────────────────────────────────────────────────────
+  // Operate on the grouped structure and flatten it back, so groups stay together
+  // and their order is exactly what you see. The whole order is persisted at once.
+  const persistOrder = async (orderedItems) => {
+    setItems(orderedItems);
+    try {
+      await accountsApi.reorder(orderedItems.map((a) => a.id));
+    } finally {
+      load();
+    }
+  };
+
+  const cloneGroups = () => groups.map((g) => ({ ...g, accounts: g.accounts.slice() }));
+
+  const moveAccount = (account, group, dir) => {
+    const next = cloneGroups();
+    const g = next.find((x) => (x.name || "") === (group.name || ""));
+    const i = g.accounts.findIndex((a) => a.id === account.id);
+    const j = i + dir;
+    if (j < 0 || j >= g.accounts.length) return;
+    [g.accounts[i], g.accounts[j]] = [g.accounts[j], g.accounts[i]];
+    persistOrder(next.flatMap((x) => x.accounts));
+  };
+
+  const moveGroup = (groupIndex, dir) => {
+    const j = groupIndex + dir;
+    if (j < 0 || j >= groups.length) return;
+    const next = cloneGroups();
+    [next[groupIndex], next[j]] = [next[j], next[groupIndex]];
+    persistOrder(next.flatMap((x) => x.accounts));
+  };
+
+  const moveBtn = { padding: "0 6px", fontSize: 11, lineHeight: 1.4, minWidth: 0 };
+  const renderCard = (a, group, idx) => (
     <GlassCard
       key={a.id}
       onDragOver={(e) => onDragOverCard(e, a)}
@@ -732,15 +765,19 @@ export default function Accounts() {
     >
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
         <div style={{ display: "flex", alignItems: "flex-start", gap: 8, minWidth: 0 }}>
-          <span
-            draggable
-            onDragStart={() => setDragId(a.id)}
-            onDragEnd={finishDrag}
-            title="Drag to reorder, or onto another group to move it there"
-            style={{ cursor: "grab", color: "rgba(255,255,255,0.3)", fontSize: 18, lineHeight: 1.2, userSelect: "none" }}
-          >
-            ⠿
-          </span>
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 2 }}>
+            <button className="glass-btn glass-btn-ghost" style={moveBtn} title="Move up" disabled={idx === 0} onClick={() => moveAccount(a, group, -1)}>▲</button>
+            <span
+              draggable
+              onDragStart={() => setDragId(a.id)}
+              onDragEnd={finishDrag}
+              title="Drag to reorder, or onto another group to move it there"
+              style={{ cursor: "grab", color: "rgba(255,255,255,0.3)", fontSize: 16, lineHeight: 1, userSelect: "none" }}
+            >
+              ⠿
+            </span>
+            <button className="glass-btn glass-btn-ghost" style={moveBtn} title="Move down" disabled={idx === group.accounts.length - 1} onClick={() => moveAccount(a, group, 1)}>▼</button>
+          </div>
           <div style={{ minWidth: 0 }}>
             <div style={{ fontSize: 16, fontWeight: 600 }}>{a.name}</div>
             {a.institution && <div style={{ fontSize: 12, color: "rgba(255,255,255,0.4)", marginTop: 2 }}>{a.institution}</div>}
@@ -826,23 +863,29 @@ export default function Accounts() {
         <div style={{ display: "flex", flexDirection: "column", gap: 22 }}>
           {hasGroups && (
             <div style={{ fontSize: 12, color: "rgba(255,255,255,0.35)" }}>
-              Drag <span style={{ color: "rgba(255,255,255,0.5)" }}>⠿</span> to reorder, or drop a card onto another group to move it there. Set a group in Edit.
+              Use <span style={{ color: "rgba(255,255,255,0.5)" }}>▲▼</span> to reorder — the buttons on a card move it within its group, the buttons on a heading move the whole group. You can also drag <span style={{ color: "rgba(255,255,255,0.5)" }}>⠿</span> onto another group. Set a group in Edit.
             </div>
           )}
-          {groups.map((g) => {
+          {groups.map((g, gi) => {
             const subtotal = g.accounts.reduce((s, a) => s + Number(a.balance), 0);
             return (
               <div key={g.name || "__ungrouped__"}>
                 {hasGroups && (
-                  <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 12, margin: "0 4px 10px", paddingBottom: 6, borderBottom: "1px solid rgba(255,255,255,0.08)" }}>
-                    <span style={{ fontSize: 13, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em", color: g.name ? "rgba(255,255,255,0.65)" : "rgba(255,255,255,0.3)" }}>
-                      {g.name || "Ungrouped"}
-                    </span>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, margin: "0 4px 10px", paddingBottom: 6, borderBottom: "1px solid rgba(255,255,255,0.08)" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+                      <div style={{ display: "flex", gap: 2 }}>
+                        <button className="glass-btn glass-btn-ghost" style={moveBtn} title="Move group up" disabled={gi === 0} onClick={() => moveGroup(gi, -1)}>▲</button>
+                        <button className="glass-btn glass-btn-ghost" style={moveBtn} title="Move group down" disabled={gi === groups.length - 1} onClick={() => moveGroup(gi, 1)}>▼</button>
+                      </div>
+                      <span style={{ fontSize: 13, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em", color: g.name ? "rgba(255,255,255,0.65)" : "rgba(255,255,255,0.3)" }}>
+                        {g.name || "Ungrouped"}
+                      </span>
+                    </div>
                     <span style={{ fontSize: 13, fontWeight: 600, color: subtotal >= 0 ? "#34d399" : "#f87171" }}>{fmt(subtotal)}</span>
                   </div>
                 )}
                 <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(280px,1fr))", gap: 16 }}>
-                  {g.accounts.map((a) => renderCard(a))}
+                  {g.accounts.map((a, idx) => renderCard(a, g, idx))}
                 </div>
               </div>
             );
@@ -890,11 +933,30 @@ export default function Accounts() {
 
               <label style={labelStyle}>
                 Group <span style={{ color: "rgba(255,255,255,0.3)", fontWeight: 400 }}>(optional — accounts with the same group are shown together)</span>
-                <input className="glass-input" style={fieldStyle} placeholder="e.g. Daily, Savings, Business" list="account-groups"
+                <input className="glass-input" style={fieldStyle} placeholder="e.g. Daily, Savings, Business"
                   value={form.groupName} onChange={(e) => setForm({ ...form, groupName: e.target.value })} />
-                <datalist id="account-groups">
-                  {groupNames.map((g) => <option key={g} value={g} />)}
-                </datalist>
+                {groupNames.length > 0 && (
+                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 8 }}>
+                    {groupNames.map((g) => {
+                      const active = form.groupName === g;
+                      return (
+                        <button
+                          key={g}
+                          type="button"
+                          onClick={() => setForm({ ...form, groupName: active ? "" : g })}
+                          style={{
+                            padding: "4px 12px", fontSize: 12, borderRadius: 999, cursor: "pointer",
+                            border: `1px solid ${active ? "rgba(129,140,248,0.6)" : "rgba(255,255,255,0.12)"}`,
+                            background: active ? "rgba(129,140,248,0.25)" : "rgba(255,255,255,0.04)",
+                            color: active ? "#c7d2fe" : "rgba(255,255,255,0.6)",
+                          }}
+                        >
+                          {g}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
               </label>
 
               <label style={labelStyle}>

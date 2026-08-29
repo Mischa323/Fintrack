@@ -88,7 +88,7 @@ To actually get Watchtower auto-updates, images must be published (GitHub Action
 
 `backend/package.json` `version` is the **single source of truth** — bump it on
 every meaningful change (keep `frontend/package.json` in sync for tidiness).
-Currently **1.24.1**.
+Currently **1.25.0**.
 
 - `GET /version` → `{ version, buildTime }` (authenticated)
 - `GET /version/check` → compares against the `version` in `backend/package.json`
@@ -400,13 +400,19 @@ literal "reorder" is not captured as an id. New accounts get `max(sortOrder)+1`.
 - The Accounts page (`Accounts.jsx`) renders accounts grouped by `groupName` under
   headings with a per-group balance subtotal; ungrouped accounts fall under an
   "Ungrouped" heading (only shown when at least one group exists).
-- **Drag-and-drop** via a `⠿` handle on each card (native HTML5 DnD, no library):
-  dragging over a card moves the dragged one to that spot **and adopts the
-  target's group**, so dropping a card onto another group moves it there. On drop,
-  `finishDrag` saves the order (`reorder`) and the moved card's group (`update`).
+- **▲▼ buttons (v1.25.0)** are the primary, reliable reorder control: on a card
+  they move it within its group; on a group heading they move the whole group.
+  Both operate on the grouped structure and flatten it back (`moveAccount`,
+  `moveGroup` → `persistOrder` → `reorder`), so groups stay contiguous and the
+  saved order is exactly what's shown.
+- **Drag-and-drop** via a `⠿` handle on each card (native HTML5 DnD, no library)
+  is still there as a bonus: dragging over a card moves the dragged one to that
+  spot **and adopts the target's group**, so dropping a card onto another group
+  moves it there. On drop, `finishDrag` saves the order and the moved card's group.
 - `GlassCard` now spreads `...rest` onto its div so it can be a drop target.
-- The group is also settable in the account Edit form (a datalist of existing
-  groups).
+- The group is set in the account Edit form: a free-text input **plus clickable
+  chips of existing groups** (v1.25.0 — a `<datalist>` was invisible to the user,
+  so existing groups never appeared as pickable options).
 
 ## Transaction modal shortcuts (v1.24.0)
 
