@@ -767,16 +767,6 @@ export default function Accounts() {
 
   const cloneGroups = () => groups.map((g) => ({ ...g, accounts: g.accounts.slice() }));
 
-  const moveAccount = (account, group, dir) => {
-    const next = cloneGroups();
-    const g = next.find((x) => (x.name || "") === (group.name || ""));
-    const i = g.accounts.findIndex((a) => a.id === account.id);
-    const j = i + dir;
-    if (j < 0 || j >= g.accounts.length) return;
-    [g.accounts[i], g.accounts[j]] = [g.accounts[j], g.accounts[i]];
-    persistOrder(next.flatMap((x) => x.accounts));
-  };
-
   const moveGroup = (groupIndex, dir) => {
     const j = groupIndex + dir;
     if (j < 0 || j >= groups.length) return;
@@ -786,7 +776,7 @@ export default function Accounts() {
   };
 
   const moveBtn = { padding: "0 6px", fontSize: 11, lineHeight: 1.4, minWidth: 0 };
-  const renderCard = (a, group, idx) => (
+  const renderCard = (a) => (
     <GlassCard
       key={a.id}
       onDragOver={(e) => onDragOverCard(e, a)}
@@ -794,19 +784,15 @@ export default function Accounts() {
     >
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
         <div style={{ display: "flex", alignItems: "flex-start", gap: 8, minWidth: 0 }}>
-          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 2 }}>
-            <button className="glass-btn glass-btn-ghost" style={moveBtn} title="Move up" disabled={idx === 0} onClick={() => moveAccount(a, group, -1)}>▲</button>
-            <span
-              draggable
-              onDragStart={() => setDragId(a.id)}
-              onDragEnd={finishDrag}
-              title="Drag to reorder, or onto another group to move it there"
-              style={{ cursor: "grab", color: "rgba(255,255,255,0.3)", fontSize: 16, lineHeight: 1, userSelect: "none" }}
-            >
-              ⠿
-            </span>
-            <button className="glass-btn glass-btn-ghost" style={moveBtn} title="Move down" disabled={idx === group.accounts.length - 1} onClick={() => moveAccount(a, group, 1)}>▼</button>
-          </div>
+          <span
+            draggable
+            onDragStart={() => setDragId(a.id)}
+            onDragEnd={finishDrag}
+            title="Drag to reorder, or onto another group to move it there"
+            style={{ cursor: "grab", color: "rgba(255,255,255,0.3)", fontSize: 16, lineHeight: 1.4, userSelect: "none" }}
+          >
+            ⠿
+          </span>
           <div style={{ minWidth: 0 }}>
             <div style={{ fontSize: 16, fontWeight: 600 }}>{a.name}</div>
             {a.institution && <div style={{ fontSize: 12, color: "rgba(255,255,255,0.4)", marginTop: 2 }}>{a.institution}</div>}
@@ -905,7 +891,7 @@ export default function Accounts() {
         <div style={{ display: "flex", flexDirection: "column", gap: 22 }}>
           {hasGroups && (
             <div style={{ fontSize: 12, color: "rgba(255,255,255,0.35)" }}>
-              Use <span style={{ color: "rgba(255,255,255,0.5)" }}>▲▼</span> to reorder — the buttons on a card move it within its group, the buttons on a heading move the whole group. You can also drag <span style={{ color: "rgba(255,255,255,0.5)" }}>⠿</span> onto another group. Set a group in Edit.
+              Drag <span style={{ color: "rgba(255,255,255,0.5)" }}>⠿</span> to reorder a card or move it onto another group; use <span style={{ color: "rgba(255,255,255,0.5)" }}>▲▼</span> on a heading to move a whole group. Set a group in Edit.
             </div>
           )}
           {groups.map((g, gi) => {
@@ -927,7 +913,7 @@ export default function Accounts() {
                   </div>
                 )}
                 <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(280px,1fr))", gap: 16 }}>
-                  {g.accounts.map((a, idx) => renderCard(a, g, idx))}
+                  {g.accounts.map((a) => renderCard(a))}
                 </div>
               </div>
             );
