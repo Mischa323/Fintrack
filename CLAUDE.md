@@ -88,7 +88,7 @@ To actually get Watchtower auto-updates, images must be published (GitHub Action
 
 `backend/package.json` `version` is the **single source of truth** — bump it on
 every meaningful change (keep `frontend/package.json` in sync for tidiness).
-Currently **1.24.0**.
+Currently **1.24.1**.
 
 - `GET /version` → `{ version, buildTime }` (authenticated)
 - `GET /version/check` → compares against the `version` in `backend/package.json`
@@ -206,6 +206,17 @@ tidy imported transaction descriptions. Configured in Settings → Local AI
   `host.docker.internal:11434`, and Ollama needs `OLLAMA_HOST=0.0.0.0`.
 - The prompt carries category hints (fuel -> Transportation, supermarkets ->
   Groceries) because without them a 7B model filed petrol under Utilities.
+- **The prompt must let the model return an empty category (v1.24.1).** The old
+  prompt demanded "exactly one from the list", so when nothing fit a weak model
+  dumped everything into whatever sat early in the list (observed: every
+  streaming/app/subscription — YouTube, Crunchyroll, Google Play, Kavita —
+  labelled "groceries"). `buildPrompt` now (a) allows `""` when nothing fits and
+  says a blank beats a wrong guess, (b) forbids defaulting to a groceries/food
+  category, and (c) lists what each merchant *is* (streaming/apps/subscriptions,
+  dining, web shops, telecom, utilities, insurance, housing, fees, salary) so the
+  model maps to the closest existing category. A suggested name not in the list is
+  still rejected and reported (the inline "+ New" category button in the
+  transaction modal makes adding the missing one quick).
 
 ## Receipts, invoices and payslips
 
