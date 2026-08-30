@@ -1,5 +1,6 @@
 const express = require("express");
 const { PrismaClient } = require("@prisma/client");
+const { clearAll } = require("../services/loginGuard");
 
 const router = express.Router();
 const prisma = new PrismaClient();
@@ -21,6 +22,9 @@ router.get("/", async (req, res) => {
     appPort: s.appPort ?? parseInt(process.env.PORT) ?? 3001,
     hasCustomJwtSecret: !!s.jwtSecret,
     transferDetection: s.transferDetection || "confirm",
+    loginBlockEnabled: s.loginBlockEnabled !== false,
+    loginMaxAttempts: s.loginMaxAttempts ?? 5,
+    loginBlockMinutes: s.loginBlockMinutes ?? 15,
     aiUrl: s.aiUrl ?? "",
     aiModel: s.aiModel ?? "",
     aiVisionModel: s.aiVisionModel ?? "",
@@ -41,8 +45,12 @@ router.put("/", async (req, res) => {
     appName, defaultCurrency, appPort, jwtSecret, transferDetection, aiUrl, aiModel, aiVisionModel, aiLanguage,
     oidcEnabled, oidcTenantId, oidcClientId, oidcClientSecret,
     googleOidcEnabled, googleClientId, googleClientSecret,
+    loginBlockEnabled, loginMaxAttempts, loginBlockMinutes,
   } = req.body;
   const data = {};
+  if (loginBlockEnabled !== undefined) data.loginBlockEnabled = Boolean(loginBlockEnabled);
+  if (loginMaxAttempts !== undefined) data.loginMaxAttempts = Math.min(100, Math.max(1, parseInt(loginMaxAttempts) || 5));
+  if (loginBlockMinutes !== undefined) data.loginBlockMinutes = Math.min(1440, Math.max(1, parseInt(loginBlockMinutes) || 15));
   if (appName !== undefined) data.appName = String(appName).trim() || "FinTrack";
   if (defaultCurrency !== undefined) data.defaultCurrency = String(defaultCurrency).trim().toUpperCase() || "EUR";
   if (appPort !== undefined) data.appPort = parseInt(appPort) || null;
@@ -62,6 +70,13 @@ router.put("/", async (req, res) => {
 
   await prisma.settings.update({ where: { id: "singleton" }, data });
   res.json({ ok: true, note: "Port and JWT secret changes take effect after restart" });
+});
+
+// POST /config/login-blocks/clear — lift every IP block/counter (recovery if you
+// locked yourself out and are still signed in elsewhere).
+router.post("/login-blocks/clear", async (req, res) => {
+  const cleared = await clearAll();
+  res.json({ cleared });
 });
 
 module.exports = router;

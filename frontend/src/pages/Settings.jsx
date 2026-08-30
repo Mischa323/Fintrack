@@ -516,13 +516,19 @@ function UserManagement({ currentUserId }) {
 
 // ── Server Config ─────────────────────────────────────────────
 function ServerConfig() {
-  const [config, setConfig] = useState({ appName: "", defaultCurrency: "", appPort: "", jwtSecret: "", transferDetection: "confirm" });
+  const [config, setConfig] = useState({ appName: "", defaultCurrency: "", appPort: "", jwtSecret: "", transferDetection: "confirm", loginBlockEnabled: true, loginMaxAttempts: 5, loginBlockMinutes: 15 });
   const [loaded, setLoaded] = useState(false);
   const [msg, setMsg] = useState(null);
 
   useEffect(() => {
     api.get("/config").then(res => {
-      setConfig({ appName: res.data.appName ?? "FinTrack", defaultCurrency: res.data.defaultCurrency ?? "EUR", appPort: res.data.appPort ?? "", jwtSecret: "", transferDetection: res.data.transferDetection ?? "confirm" });
+      setConfig({
+        appName: res.data.appName ?? "FinTrack", defaultCurrency: res.data.defaultCurrency ?? "EUR",
+        appPort: res.data.appPort ?? "", jwtSecret: "", transferDetection: res.data.transferDetection ?? "confirm",
+        loginBlockEnabled: res.data.loginBlockEnabled !== false,
+        loginMaxAttempts: res.data.loginMaxAttempts ?? 5,
+        loginBlockMinutes: res.data.loginBlockMinutes ?? 15,
+      });
       setLoaded(true);
     });
   }, []);
@@ -530,10 +536,25 @@ function ServerConfig() {
   async function handleSubmit(e) {
     e.preventDefault(); setMsg(null);
     try {
-      const res = await api.put("/config", { appName: config.appName, defaultCurrency: config.defaultCurrency, appPort: config.appPort ? Number(config.appPort) : undefined, jwtSecret: config.jwtSecret || undefined, transferDetection: config.transferDetection });
+      const res = await api.put("/config", {
+        appName: config.appName, defaultCurrency: config.defaultCurrency,
+        appPort: config.appPort ? Number(config.appPort) : undefined, jwtSecret: config.jwtSecret || undefined,
+        transferDetection: config.transferDetection,
+        loginBlockEnabled: config.loginBlockEnabled,
+        loginMaxAttempts: Number(config.loginMaxAttempts) || 5,
+        loginBlockMinutes: Number(config.loginBlockMinutes) || 15,
+      });
       setMsg({ type: "success", text: res.data.note || "Configuration saved" });
       setConfig(c => ({ ...c, jwtSecret: "" }));
     } catch (err) { setMsg({ type: "error", text: err.response?.data?.error || "Failed to save config" }); }
+  }
+
+  async function clearBlocks() {
+    setMsg(null);
+    try {
+      const res = await api.post("/config/login-blocks/clear");
+      setMsg({ type: "success", text: `Cleared ${res.data.cleared} IP block${res.data.cleared === 1 ? "" : "s"}.` });
+    } catch (err) { setMsg({ type: "error", text: err.response?.data?.error || "Failed to clear blocks" }); }
   }
 
   if (!loaded) return <p style={{ color: "rgba(255,255,255,0.4)", fontSize: 14 }}>Loading…</p>;
@@ -585,6 +606,39 @@ function ServerConfig() {
               </button>
             );
           })}
+        </div>
+      </div>
+
+      <div style={{ marginTop: 18, paddingTop: 18, borderTop: "1px solid rgba(255,255,255,0.07)" }}>
+        <div style={{ fontSize: 13, color: "rgba(255,255,255,0.6)", fontWeight: 600, marginBottom: 4 }}>
+          Login protection (brute-force)
+        </div>
+        <div style={{ fontSize: 13, color: "rgba(255,255,255,0.45)", marginBottom: 12, lineHeight: 1.6 }}>
+          Block an IP address for a while after too many failed sign-in attempts. Blocks lift
+          automatically; a correct sign-in resets the counter.
+        </div>
+
+        <label style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer", fontSize: 14, marginBottom: 14 }}>
+          <input type="checkbox" checked={config.loginBlockEnabled} onChange={e => setConfig(c => ({ ...c, loginBlockEnabled: e.target.checked }))} style={{ width: 16, height: 16, cursor: "pointer" }} />
+          Block an IP after too many failed logins
+        </label>
+
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, opacity: config.loginBlockEnabled ? 1 : 0.45, pointerEvents: config.loginBlockEnabled ? "auto" : "none" }}>
+          <Field label="Failed attempts before blocking">
+            <input className="glass-input" style={inp} type="number" min="1" max="100" value={config.loginMaxAttempts}
+              onChange={e => setConfig(c => ({ ...c, loginMaxAttempts: e.target.value }))} />
+          </Field>
+          <Field label="Block duration (minutes)">
+            <input className="glass-input" style={inp} type="number" min="1" max="1440" value={config.loginBlockMinutes}
+              onChange={e => setConfig(c => ({ ...c, loginBlockMinutes: e.target.value }))} />
+          </Field>
+        </div>
+
+        <button type="button" className="glass-btn glass-btn-ghost" style={{ padding: "7px 16px", fontSize: 13, marginTop: 12 }} onClick={clearBlocks}>
+          Clear all IP blocks now
+        </button>
+        <div style={{ fontSize: 11, color: "rgba(255,255,255,0.35)", marginTop: 6, lineHeight: 1.5 }}>
+          Locked out yourself? Clear the blocks here from a device that's still signed in — or just wait for the block to lift.
         </div>
       </div>
 

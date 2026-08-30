@@ -88,7 +88,7 @@ To actually get Watchtower auto-updates, images must be published (GitHub Action
 
 `backend/package.json` `version` is the **single source of truth** — bump it on
 every meaningful change (keep `frontend/package.json` in sync for tidiness).
-Currently **1.29.0**.
+Currently **1.30.0**.
 
 - `GET /version` → `{ version, buildTime }` (authenticated)
 - `GET /version/check` → compares against the `version` in `backend/package.json`
@@ -131,6 +131,28 @@ Bearer header, so JS must read the token back.
   first-run setup persist (`login(token, true)`).
 - A token left in `localStorage` by an older version is migrated to a cookie on
   first `getToken()`.
+
+## Login brute-force protection (v1.30.0)
+
+Block an IP after too many failed logins, configurable in Settings → server config.
+`Settings.loginBlockEnabled` / `loginMaxAttempts` (default 5) / `loginBlockMinutes`
+(default 15); per-IP counters live in the `LoginAttempt` table (survives restart).
+
+- `services/loginGuard.js` is the whole mechanism: `checkBlocked` (refuse while
+  `blockedUntil` is in the future), `recordFailure` (increment within the window,
+  set `blockedUntil` and reset the counter once the limit is hit), `recordSuccess`
+  (delete the IP's row), `clearAll`. `POST /auth/login` calls them — a wrong
+  password **or** wrong 2FA code counts; `requires2FA` does not.
+- **Real client IP behind nginx**: `getClientIp` reads `X-Real-IP` (nginx sets it
+  to `$remote_addr`) then `X-Forwarded-For`, then the socket. Express has no
+  `trust proxy`, so don't switch to `req.ip`. nginx-spa.conf now also sets
+  `X-Forwarded-For`. Only nginx talks to the backend, so these headers are trusted.
+- Blocked responses are **429** with a "try again in N minutes" message; the Login
+  page shows it via the existing error path.
+- **Self-lockout recovery**: `POST /config/login-blocks/clear` (Settings button
+  "Clear all IP blocks now") wipes all blocks — usable from another still-signed-in
+  device; otherwise the block lifts on its own. Like the rest of `/config`, it is
+  authed but not admin-only (the app's model treats any signed-in user as admin).
 
 ## Gotchas already hit (do not regress)
 

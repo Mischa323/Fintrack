@@ -256,8 +256,22 @@ model Settings {
   aiLanguage         String?
   // How imports handle transfers between two known accounts: off | auto | confirm
   transferDetection  String   @default("confirm")
+  // Brute-force protection: block an IP after too many failed logins.
+  loginBlockEnabled  Boolean  @default(true)
+  loginMaxAttempts   Int      @default(5)
+  loginBlockMinutes  Int      @default(15)
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
+}
+
+// Failed-login tracking per IP for the brute-force block. One row per IP; the
+// counter resets on a successful login (or once the block lifts).
+model LoginAttempt {
+  ip           String    @id
+  failedCount  Int       @default(0)
+  windowStart  DateTime  @default(now())
+  blockedUntil DateTime?
+  updatedAt    DateTime  @updatedAt
 }
 
 model BackupConfig {

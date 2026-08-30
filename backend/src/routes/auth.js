@@ -7,6 +7,7 @@ const { Issuer, generators } = require("openid-client");
 const { PrismaClient } = require("@prisma/client");
 const authMiddleware = require("../middleware/auth");
 const { getJwtSecret } = require("../services/jwtSecret");
+const { getClientIp, checkBlocked, recordFailure, recordSuccess } = require("../services/loginGuard");
 
 const router = express.Router();
 const prisma = new PrismaClient();
@@ -67,11 +68,26 @@ router.post("/login", async (req, res) => {
   const { username, password, totpCode, remember } = req.body;
   if (!username || !password) return res.status(400).json({ error: "Username and password required" });
 
+  // Brute-force block: refuse outright while this IP is locked out, and count
+  // each wrong password / 2FA code toward the limit.
+  const ip = getClientIp(req);
+  const blockedMsg = "Too many failed attempts — this IP is temporarily blocked. Try again later.";
+  const block = await checkBlocked(ip);
+  if (block.blocked) {
+    const mins = Math.ceil(block.retryAfterSec / 60);
+    return res.status(429).json({ error: `Too many failed attempts. Try again in ${mins} minute${mins === 1 ? "" : "s"}.` });
+  }
+
+  const fail = async (msg) => {
+    const f = await recordFailure(ip);
+    return res.status(f.blocked ? 429 : 401).json({ error: f.blocked ? blockedMsg : msg });
+  };
+
   const user = await prisma.user.findUnique({ where: { username } });
-  if (!user || !user.passwordHash) return res.status(401).json({ error: "Invalid username or password" });
+  if (!user || !user.passwordHash) return fail("Invalid username or password");
 
   const valid = await bcrypt.compare(password, user.passwordHash);
-  if (!valid) return res.status(401).json({ error: "Invalid username or password" });
+  if (!valid) return fail("Invalid username or password");
 
   if (user.twoFactorEnabled) {
     if (!totpCode) return res.status(200).json({ requires2FA: true });
@@ -81,9 +97,10 @@ router.post("/login", async (req, res) => {
       token: totpCode,
       window: 1,
     });
-    if (!verified) return res.status(401).json({ error: "Invalid 2FA code" });
+    if (!verified) return fail("Invalid 2FA code");
   }
 
+  await recordSuccess(ip);
   res.json({ token: signToken(user, remember) });
 });
 
