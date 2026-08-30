@@ -13,6 +13,7 @@ export default function Login() {
   const [needs2FA, setNeeds2FA] = useState(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [remember, setRemember] = useState(true);
 
   const setupMode = !status?.isSetup;
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -23,7 +24,7 @@ export default function Login() {
     const token = params.get("token");
     const err = params.get("error");
     if (token) {
-      login(token);
+      login(token, true);
       window.history.replaceState({}, "", "/login");
       navigate("/dashboard");
     } else if (err) {
@@ -47,7 +48,7 @@ export default function Login() {
     setLoading(true);
     try {
       const res = await api.post("/auth/setup", { username: username.trim(), password });
-      login(res.data.token);
+      login(res.data.token, true);
       await refreshStatus();
       navigate("/dashboard");
     } catch (err) {
@@ -62,13 +63,13 @@ export default function Login() {
     setError("");
     setLoading(true);
     try {
-      const res = await api.post("/auth/login", { username, password, totpCode: totpCode || undefined });
+      const res = await api.post("/auth/login", { username, password, totpCode: totpCode || undefined, remember });
       if (res.data.requires2FA) {
         setNeeds2FA(true);
         setLoading(false);
         return;
       }
-      login(res.data.token);
+      login(res.data.token, remember);
       navigate("/dashboard");
     } catch (err) {
       setError(err.response?.data?.error || "Login failed");
@@ -216,6 +217,12 @@ export default function Login() {
                     placeholder="000000" autoFocus
                   />
                 </div>
+              )}
+              {!needs2FA && (
+                <label style={{ display: "flex", alignItems: "center", gap: 9, cursor: "pointer", fontSize: 13, color: "rgba(255,255,255,0.6)", userSelect: "none" }}>
+                  <input type="checkbox" checked={remember} onChange={e => setRemember(e.target.checked)} style={{ cursor: "pointer", width: 16, height: 16 }} />
+                  Keep me signed in
+                </label>
               )}
               <button type="submit" style={{ ...btnStyle, marginTop: 4 }} disabled={loading}>
                 {loading ? "Signing in…" : needs2FA ? "Verify" : "Sign in"}

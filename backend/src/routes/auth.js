@@ -16,11 +16,13 @@ const APP_NAME = "FinTrack";
 const oidcClientCache = new Map();
 const googleClientCache = new Map();
 
-function signToken(user) {
+// "Keep me signed in" issues a longer-lived token so a persistent cookie stays
+// valid across a browser restart for weeks, not just the default week.
+function signToken(user, remember = false) {
   return jwt.sign(
     { userId: user.id, username: user.username, role: user.role },
     getJwtSecret(),
-    { expiresIn: "7d" }
+    { expiresIn: remember ? "30d" : "7d" }
   );
 }
 
@@ -62,7 +64,7 @@ router.post("/setup", async (req, res) => {
 
 // POST /auth/login
 router.post("/login", async (req, res) => {
-  const { username, password, totpCode } = req.body;
+  const { username, password, totpCode, remember } = req.body;
   if (!username || !password) return res.status(400).json({ error: "Username and password required" });
 
   const user = await prisma.user.findUnique({ where: { username } });
@@ -82,7 +84,7 @@ router.post("/login", async (req, res) => {
     if (!verified) return res.status(401).json({ error: "Invalid 2FA code" });
   }
 
-  res.json({ token: signToken(user) });
+  res.json({ token: signToken(user, remember) });
 });
 
 // ── Authenticated routes (require valid JWT) ──────────────────

@@ -1,5 +1,6 @@
 import { createContext, useContext, useState, useEffect, useCallback } from "react";
 import api from "../api/client";
+import { getToken, setToken as storeToken, clearToken } from "../api/tokenStore";
 
 const AuthContext = createContext(null);
 
@@ -13,7 +14,7 @@ function parseToken(token) {
 }
 
 export function AuthProvider({ children }) {
-  const [token, setToken] = useState(() => localStorage.getItem("fintrack_token"));
+  const [token, setToken] = useState(() => getToken());
   const [status, setStatus] = useState(null); // { isSetup, oidcEnabled }
   const [loading, setLoading] = useState(true);
 
@@ -32,13 +33,13 @@ export function AuthProvider({ children }) {
 
   useEffect(() => { fetchStatus(); }, [fetchStatus]);
 
-  const login = useCallback((newToken) => {
-    localStorage.setItem("fintrack_token", newToken);
+  const login = useCallback((newToken, remember = false) => {
+    storeToken(newToken, remember);
     setToken(newToken);
   }, []);
 
   const logout = useCallback(() => {
-    localStorage.removeItem("fintrack_token");
+    clearToken();
     setToken(null);
   }, []);
 

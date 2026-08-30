@@ -1,4 +1,5 @@
 import axios from "axios";
+import { getToken, clearToken } from "./tokenStore";
 
 const API_BASE = import.meta.env.VITE_API_URL || "/api";
 
@@ -8,7 +9,7 @@ const api = axios.create({
 
 // Attach token to every request
 api.interceptors.request.use((config) => {
-  const token = localStorage.getItem("fintrack_token");
+  const token = getToken();
   if (token) config.headers.Authorization = `Bearer ${token}`;
   return config;
 });
@@ -18,7 +19,7 @@ api.interceptors.response.use(
   (r) => r,
   (err) => {
     if (err.response?.status === 401 && !err.config.url.includes("/auth/")) {
-      localStorage.removeItem("fintrack_token");
+      clearToken();
       window.location.href = "/login";
     }
     return Promise.reject(err);

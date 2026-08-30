@@ -88,7 +88,7 @@ To actually get Watchtower auto-updates, images must be published (GitHub Action
 
 `backend/package.json` `version` is the **single source of truth** — bump it on
 every meaningful change (keep `frontend/package.json` in sync for tidiness).
-Currently **1.28.0**.
+Currently **1.29.0**.
 
 - `GET /version` → `{ version, buildTime }` (authenticated)
 - `GET /version/check` → compares against the `version` in `backend/package.json`
@@ -113,6 +113,24 @@ the server accepts requests:
 It lives in the DB (`db_data` volume), so it survives redeploys and is included in
 backups. No insecure hardcoded default. The Settings "custom JWT secret" field feeds
 step 2. Changing the secret invalidates existing sessions.
+
+## Auth token storage / "Keep me signed in" (v1.29.0)
+
+The JWT is stored in a **cookie**, not localStorage — `frontend/src/api/tokenStore.js`
+is the single place that reads/writes it (`getToken`/`setToken`/`clearToken`).
+`client.js` attaches it as an `Authorization: Bearer` header and clears it on 401;
+`AuthContext` seeds state from it and `login(token, remember)` / `logout` go through
+it. The cookie is deliberately **not httpOnly** because the backend authenticates by
+Bearer header, so JS must read the token back.
+
+- **"Keep me signed in"** (Login checkbox, default on): checked → a persistent
+  cookie (`Max-Age` 30 days); unchecked → a session cookie the browser drops on
+  close. The backend mirrors this — `signToken(user, remember)` issues a **30d**
+  token when remembered, else **7d** — so a persistent cookie is not left holding a
+  token the server already rejects. `POST /auth/login` takes `remember`; SSO and
+  first-run setup persist (`login(token, true)`).
+- A token left in `localStorage` by an older version is migrated to a cookie on
+  first `getToken()`.
 
 ## Gotchas already hit (do not regress)
 
