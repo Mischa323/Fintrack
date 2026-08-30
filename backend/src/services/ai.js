@@ -129,6 +129,46 @@ function buildPrompt(rows, categories, language) {
   ].join("\n");
 }
 
+// Maps the model's category word onto one that actually exists, rather than
+// rejecting anything that is not spelled identically. A weak model returns
+// generic words ("transport", "salary", "dining") that rarely match a user's
+// exact names ("Transportation", "Income"), so: try an exact match, then a
+// substring either way, then a small synonym table. No match returns null and the
+// suggestion is reported as unknown, so nothing is mis-filed silently.
+const CATEGORY_SYNONYMS = {
+  salary: "income", wage: "income", wages: "income", payroll: "income", loon: "income", salaris: "income",
+  fuel: "transport", petrol: "transport", gas: "transport", transit: "transport", travel: "transport",
+  dining: "restaurant", restaurants: "restaurant", takeaway: "restaurant", food: "grocer",
+  streaming: "entertainment", media: "entertainment",
+  subscription: "subscription", telecom: "utilit", phone: "utilit", internet: "utilit", energy: "utilit",
+  rent: "housing", mortgage: "housing", shopping: "shop", webshop: "shop",
+};
+
+function resolveCategory(raw, categories) {
+  const name = String(raw || "").trim().toLowerCase();
+  if (!name) return null;
+  const norm = categories.map((c) => ({ c, n: c.name.trim().toLowerCase() }));
+
+  // Exact
+  const exact = norm.find((x) => x.n === name);
+  if (exact) return exact.c;
+
+  // Substring either direction, but only for words long enough to be meaningful
+  // (avoids "in" matching "Income"/"Insurance"). Handles transport↔transportation.
+  if (name.length >= 4) {
+    const sub = norm.find((x) => x.n.includes(name) || (x.n.length >= 4 && name.includes(x.n)));
+    if (sub) return sub.c;
+  }
+
+  // Synonym → concept, then match that concept against the real categories
+  const concept = CATEGORY_SYNONYMS[name];
+  if (concept) {
+    const syn = norm.find((x) => x.n.includes(concept) || concept.includes(x.n));
+    if (syn) return syn.c;
+  }
+  return null;
+}
+
 // Returns one suggestion per transaction that the model answered for. Anything
 // it skipped or answered nonsensically is simply left out rather than guessed.
 async function suggestForTransactions(transactionIds) {
@@ -143,7 +183,6 @@ async function suggestForTransactions(transactionIds) {
 
   const categories = await prisma.category.findMany({ select: { id: true, name: true } });
   const names = categories.map((c) => c.name);
-  const byName = new Map(categories.map((c) => [c.name.trim().toLowerCase(), c]));
 
   const suggestions = [];
   let failed = 0;
@@ -176,7 +215,7 @@ async function suggestForTransactions(transactionIds) {
     for (const answer of answers) {
       const target = batch[Number(answer.i) - 1];
       if (!target) continue;
-      const category = byName.get(String(answer.category || "").trim().toLowerCase());
+      const category = resolveCategory(answer.category, categories);
       const cleaned = String(answer.name || "").trim();
       // Only offer a change when there is actually something to change
       if (!category && !cleaned) continue;

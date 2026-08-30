@@ -88,7 +88,7 @@ To actually get Watchtower auto-updates, images must be published (GitHub Action
 
 `backend/package.json` `version` is the **single source of truth** — bump it on
 every meaningful change (keep `frontend/package.json` in sync for tidiness).
-Currently **1.30.0**.
+Currently **1.30.1**.
 
 - `GET /version` → `{ version, buildTime }` (authenticated)
 - `GET /version/check` → compares against the `version` in `backend/package.json`
@@ -257,6 +257,14 @@ tidy imported transaction descriptions. Configured in Settings → Local AI
   model maps to the closest existing category. A suggested name not in the list is
   still rejected and reported (the inline "+ New" category button in the
   transaction modal makes adding the missing one quick).
+- **The suggested category is fuzzy-matched to the real list (v1.30.1).** The
+  concept words a weak model returns rarely equal a user's exact names, so almost
+  everything came back "does not exist" (observed: `transport`→no match though
+  `Transportation` exists, `salary`→`Income`, `dining`→nothing). `resolveCategory`
+  in `services/ai.js` now tries exact, then a substring either way (≥4 chars, so
+  `transport`⊂`transportation`), then a small synonym table (salary→income,
+  fuel→transport, …). No match still returns null and is reported, so nothing is
+  mis-filed silently.
 
 ## Receipts, invoices and payslips
 

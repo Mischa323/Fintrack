@@ -174,6 +174,7 @@ function Field({ label, children, help }) {
 
 const inp = { width: "100%", padding: "9px 13px", fontSize: 14, boxSizing: "border-box" };
 const sel = { ...inp, padding: "9px 10px" };
+const labelStyle = { fontSize: 12, color: "rgba(255,255,255,0.5)", fontWeight: 500, marginBottom: 6, display: "block" };
 
 function Alert({ type, message }) {
   if (!message) return null;
