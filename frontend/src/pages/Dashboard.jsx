@@ -737,7 +737,7 @@ function DashboardGrid({ widgets, editMode, overview, monthly, onWidgetsChange, 
   const resizeWidget = (id, cols) => onWidgetsChange(widgets.map(w => w.id === id ? { ...w, cols } : w));
 
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "repeat(12, 1fr)", gap: 20 }}>
+    <div className="dashboard-grid">
       {widgets.map((widget, i) => {
         const isDragging   = dragIdx === i;
         const isDropTarget = dropIdx === i && dragIdx !== null && dragIdx !== i;

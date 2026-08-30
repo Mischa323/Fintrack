@@ -88,7 +88,7 @@ To actually get Watchtower auto-updates, images must be published (GitHub Action
 
 `backend/package.json` `version` is the **single source of truth** — bump it on
 every meaningful change (keep `frontend/package.json` in sync for tidiness).
-Currently **1.27.0**.
+Currently **1.28.0**.
 
 - `GET /version` → `{ version, buildTime }` (authenticated)
 - `GET /version/check` → compares against the `version` in `backend/package.json`
@@ -597,6 +597,26 @@ INCOME/EXPENSE, so a linked transfer correctly stays out of income and expense.
 
 **Status:** Phase 1 shipped in v1.2.0. Phase 2 (GoCardless auto-sync) not started;
 it should reuse `persistRows` from `services/importTransactions.js`.
+
+## Mobile / responsive (v1.28.0)
+
+The UI is inline-style-heavy, and inline styles beat media queries — so the
+layout-critical sizing was moved into CSS classes in `index.css` that a
+`@media (max-width: 768px)` block can override:
+
+- `.sidebar` / `.main-content` / `.mobile-topbar` / `.sidebar-backdrop`: on desktop
+  the sidebar is the fixed 220px rail; on mobile it becomes an off-canvas drawer
+  (translateX) toggled by a hamburger in a fixed top bar, with a tap-to-close
+  backdrop. `Layout.jsx` holds the open/close state and closes on nav. Don't put
+  width/position/margin back inline on these — it would defeat the media query.
+- `.dashboard-grid` replaces the inline `grid-template-columns: repeat(12,1fr)` on
+  the dashboard grid; on mobile it collapses to one column and forces every widget
+  `grid-column: 1 / -1 !important` (overriding each cell's inline span).
+- Wide tables scroll in their own box: the Transactions table is wrapped in
+  `.scroll-x` with a `minWidth`, and the modal tables (holdings, trades, loan
+  payments, AI review) got `overflowX: auto` + a table `minWidth`. `body` is
+  `overflow-x: hidden` on mobile so nothing bleeds past the viewport.
+- `index.html` carries the viewport meta (already present) plus `theme-color`.
 
 ## Conventions
 

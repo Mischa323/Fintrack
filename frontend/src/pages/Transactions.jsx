@@ -125,7 +125,7 @@ function AiReviewModal({ ids, categories, onClose, onApplied }) {
               </div>
             )}
 
-            <div style={{ flex: 1, overflowY: "auto", marginTop: 14, minHeight: 120 }}>
+            <div style={{ flex: 1, overflowY: "auto", overflowX: "auto", marginTop: 14, minHeight: 120 }}>
               <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
                 <thead>
                   <tr style={{ borderBottom: "1px solid rgba(255,255,255,0.08)" }}>
@@ -499,7 +499,8 @@ export default function Transactions() {
 
       {/* Table */}
       <GlassCard style={{ padding: 0, overflow: "hidden" }}>
-        <table style={{ width: "100%", borderCollapse: "collapse" }}>
+        <div className="scroll-x">
+        <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 620 }}>
           <thead>
             <tr style={{ borderBottom: "1px solid rgba(255,255,255,0.08)" }}>
               <th style={{ padding: "14px 8px 14px 16px", width: 32 }}>
@@ -588,6 +589,7 @@ export default function Transactions() {
             )}
           </tbody>
         </table>
+        </div>
       </GlassCard>
 
       {/* Pagination */}

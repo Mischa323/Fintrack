@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Outlet, NavLink, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 
@@ -16,30 +17,30 @@ const NAV = [
 export default function Layout() {
   const { logout } = useAuth();
   const navigate = useNavigate();
+  // On mobile the sidebar is an off-canvas drawer; tapping a link or the backdrop
+  // closes it. On desktop the class does nothing and the sidebar is always shown.
+  const [open, setOpen] = useState(false);
+  const close = () => setOpen(false);
 
   function handleLogout() {
+    close();
     logout();
     navigate("/login");
   }
 
   return (
-    <div style={{ display: "flex", minHeight: "100vh" }}>
-      {/* Sidebar */}
-      <aside className="glass-strong" style={{
-        width: 220,
-        minHeight: "100vh",
-        padding: "24px 12px",
-        display: "flex",
-        flexDirection: "column",
-        gap: 4,
-        position: "fixed",
-        top: 0,
-        left: 0,
-        bottom: 0,
-        zIndex: 10,
-        borderRadius: 0,
-        borderRight: "1px solid rgba(255,255,255,0.1)",
-      }}>
+    <div className="app-shell">
+      {/* Mobile top bar (hidden on desktop via CSS) */}
+      <div className="mobile-topbar glass-strong">
+        <button className="hamburger" onClick={() => setOpen((v) => !v)} aria-label="Menu">☰</button>
+        <img src="/logo.svg" alt="FinTrack" style={{ height: 24, width: "auto" }} />
+      </div>
+
+      {/* Backdrop behind the open drawer (mobile only) */}
+      <div className={`sidebar-backdrop${open ? " open" : ""}`} onClick={close} />
+
+      {/* Sidebar / drawer */}
+      <aside className={`sidebar glass-strong${open ? " open" : ""}`}>
         {/* Logo */}
         <div style={{ padding: "8px 8px 20px", borderBottom: "1px solid rgba(255,255,255,0.08)", marginBottom: 12 }}>
           <img src="/logo.svg" alt="FinTrack" style={{ width: 148, height: "auto", display: "block" }} />
@@ -50,6 +51,7 @@ export default function Layout() {
           <NavLink
             key={n.to}
             to={n.to}
+            onClick={close}
             className={({ isActive }) => `nav-item${isActive ? " active" : ""}`}
           >
             <span style={{ fontSize: 16 }}>{n.icon}</span>
@@ -61,6 +63,7 @@ export default function Layout() {
         <div style={{ marginTop: "auto", borderTop: "1px solid rgba(255,255,255,0.08)", paddingTop: 12, display: "flex", flexDirection: "column", gap: 4 }}>
           <NavLink
             to="/settings"
+            onClick={close}
             className={({ isActive }) => `nav-item${isActive ? " active" : ""}`}
           >
             <span style={{ fontSize: 16 }}>⚙</span>
@@ -78,7 +81,7 @@ export default function Layout() {
       </aside>
 
       {/* Main content */}
-      <main style={{ marginLeft: 220, flex: 1, padding: "32px 28px", maxWidth: "calc(100vw - 220px)" }}>
+      <main className="main-content">
         <Outlet />
       </main>
     </div>

@@ -263,3 +263,91 @@ select option {
 
 /* Small inline spinner for buttons/loading states */
 @keyframes spin { to { transform: rotate(360deg); } }
+
+/* ── Responsive layout ─────────────────────────────────────────────
+   Structural sizing lives here (not inline) so the media queries below can
+   actually override it — inline styles would otherwise win. */
+.app-shell { display: flex; min-height: 100vh; }
+
+.sidebar {
+  width: 220px;
+  min-height: 100vh;
+  padding: 24px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  position: fixed;
+  top: 0; left: 0; bottom: 0;
+  z-index: 30;
+  border-radius: 0;
+  border-right: 1px solid rgba(255, 255, 255, 0.1);
+  overflow-y: auto;
+}
+
+.main-content {
+  margin-left: 220px;
+  flex: 1;
+  padding: 32px 28px;
+  max-width: calc(100vw - 220px);
+}
+
+.mobile-topbar { display: none; }
+.sidebar-backdrop { display: none; }
+
+.hamburger {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 40px; height: 40px; border-radius: 10px; flex-shrink: 0;
+  background: rgba(255, 255, 255, 0.06); border: 1px solid rgba(255, 255, 255, 0.1);
+  color: #e2e8f0; font-size: 18px; cursor: pointer;
+}
+
+/* Dashboard 12-col grid (class, not inline, so mobile can collapse it) */
+.dashboard-grid { display: grid; grid-template-columns: repeat(12, 1fr); gap: 20px; }
+
+/* Wide content (tables) scrolls inside its own box instead of the page */
+.scroll-x { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+
+@media (max-width: 768px) {
+  body { overflow-x: hidden; }
+
+  .sidebar {
+    transform: translateX(-100%);
+    transition: transform 0.25s ease;
+    width: 250px;
+    max-width: 82vw;
+    z-index: 40;
+  }
+  .sidebar.open { transform: translateX(0); }
+
+  .main-content {
+    margin-left: 0;
+    max-width: 100vw;
+    padding: 70px 14px 28px;
+  }
+
+  .mobile-topbar {
+    display: flex;
+    position: fixed;
+    top: 0; left: 0; right: 0;
+    height: 56px;
+    align-items: center;
+    gap: 14px;
+    padding: 0 16px;
+    z-index: 20;
+    border-radius: 0;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  }
+
+  .sidebar-backdrop.open {
+    display: block;
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.55);
+    backdrop-filter: blur(2px);
+    z-index: 35;
+  }
+
+  .dashboard-grid { grid-template-columns: 1fr; gap: 14px; }
+  /* Every widget goes full-width regardless of its saved column span */
+  .dashboard-grid > * { grid-column: 1 / -1 !important; }
+}

@@ -242,7 +242,7 @@ function HoldingTradesModal({ holding, onClose, onChanged }) {
         {error && <div style={{ marginTop: 10, fontSize: 13, color: "#f87171" }}>{error}</div>}
 
         {/* History */}
-        <div style={{ flex: 1, overflowY: "auto", marginTop: 18, minHeight: 100 }}>
+        <div style={{ flex: 1, overflowY: "auto", overflowX: "auto", marginTop: 18, minHeight: 100 }}>
           {loading ? (
             <div style={{ color: "rgba(255,255,255,0.35)", fontSize: 13 }}>Loading…</div>
           ) : trades.length === 0 ? (
@@ -250,7 +250,7 @@ function HoldingTradesModal({ holding, onClose, onChanged }) {
               No trades recorded yet. Record a buy or sell above.
             </div>
           ) : (
-            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, minWidth: 460 }}>
               <thead>
                 <tr style={{ borderBottom: "1px solid rgba(255,255,255,0.08)" }}>
                   {["Date", "", "Qty", "Price", ""].map((h, i) => (
@@ -448,7 +448,7 @@ function HoldingsModal({ account, onClose, onChanged }) {
           <ValueHistoryChart accountId={account.id} currency={account.currency} />
         )}
 
-        <div style={{ flex: 1, overflowY: "auto", marginTop: 16, minHeight: 100 }}>
+        <div style={{ flex: 1, overflowY: "auto", overflowX: "auto", marginTop: 16, minHeight: 100 }}>
           {loading ? (
             <div style={{ color: "rgba(255,255,255,0.35)", fontSize: 13 }}>Loading…</div>
           ) : rows.length === 0 ? (
@@ -460,7 +460,7 @@ function HoldingsModal({ account, onClose, onChanged }) {
               )}
             </div>
           ) : (
-            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, minWidth: 460 }}>
               <thead>
                 <tr style={{ borderBottom: "1px solid rgba(255,255,255,0.08)" }}>
                   {["Symbol", "Qty", "Price", "Value", "Gain", ""].map((h) => (

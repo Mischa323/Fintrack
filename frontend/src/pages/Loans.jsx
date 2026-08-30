@@ -112,7 +112,7 @@ function LoanPaymentsModal({ loan, onClose, onChanged }) {
         {error && <div style={{ marginTop: 10, fontSize: 13, color: "#f87171" }}>{error}</div>}
 
         {/* History */}
-        <div style={{ flex: 1, overflowY: "auto", marginTop: 18, minHeight: 100 }}>
+        <div style={{ flex: 1, overflowY: "auto", overflowX: "auto", marginTop: 18, minHeight: 100 }}>
           {payments.length === 0 ? (
             <div style={{ color: "rgba(255,255,255,0.3)", fontSize: 13, padding: "24px 0", textAlign: "center" }}>
               No repayments yet. Record the first one above.
