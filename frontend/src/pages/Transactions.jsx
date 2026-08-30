@@ -224,6 +224,7 @@ export default function Transactions() {
   const [accounts, setAccounts] = useState([]);
   const [categories, setCategories] = useState([]);
   const [modal, setModal] = useState(false);
+  const [step, setStep] = useState(0);
   const [form, setForm] = useState(emptyForm);
   const [editing, setEditing] = useState(null);
   const [saving, setSaving] = useState(false);
@@ -264,6 +265,7 @@ export default function Transactions() {
       // don't reselect it every time.
       accountId: filters.accountId || accounts[0]?.id || "",
     });
+    setStep(0);
     setModal(true);
   };
 
@@ -389,6 +391,37 @@ export default function Transactions() {
   // blocked; transfers are always fine.
   const selectedAccount = accounts.find((a) => a.id === form.accountId);
   const investmentBlocked = !isTransfer && selectedAccount?.type === "INVESTMENT";
+
+  // ── Add/Edit wizard: one thing per step, so it's clear on a phone what goes
+  // where. 0 Type · 1 Amount & date · 2 Account(s) · 3 Details.
+  const STEP_TITLES = ["Type", "Amount & date", isTransfer ? "Accounts" : "Account", "Details"];
+  const stepValid = (s) => {
+    if (s === 1) return form.amount && Number(form.amount) > 0 && !!form.date;
+    if (s === 2) {
+      if (!form.accountId || investmentBlocked) return false;
+      if (isTransfer) return form.toAccountId && form.toAccountId !== form.accountId;
+      return true;
+    }
+    if (s === 3) return !!form.description.trim();
+    return true;
+  };
+  const stepMsg = (s) => {
+    if (s === 1) return "Enter an amount above zero and a date";
+    if (s === 2) {
+      if (!form.accountId) return isTransfer ? "Pick the account the money leaves" : "Pick an account";
+      if (investmentBlocked) return "Investment accounts only take transfers — switch above";
+      if (isTransfer && !form.toAccountId) return "Pick the account the money goes to";
+      if (isTransfer && form.toAccountId === form.accountId) return "From and To must be different accounts";
+    }
+    if (s === 3) return "Add a short description";
+    return "";
+  };
+  const goNext = () => {
+    if (!stepValid(step)) { setSaveError(stepMsg(step)); return; }
+    setSaveError("");
+    setStep((s) => Math.min(3, s + 1));
+  };
+  const goBack = () => { setSaveError(""); setStep((s) => Math.max(0, s - 1)); };
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
@@ -604,143 +637,188 @@ export default function Transactions() {
       {/* Modal */}
       {modal && (
         <div className="modal-overlay" onClick={(e) => e.target === e.currentTarget && setModal(false)}>
-          <div className="glass-strong" style={{ width: 480, padding: "32px 36px", maxWidth: "95vw", borderRadius: 20 }}>
-            <h2 style={{ margin: "0 0 24px", fontSize: 18, fontWeight: 700 }}>{editing ? "Edit" : "Add"} Transaction</h2>
-
-            <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-              {/* Type selector */}
-              <div style={{ display: "flex", gap: 8 }}>
-                {["EXPENSE", "INCOME", "TRANSFER"].map((t) => (
-                  <button key={t} onClick={() => setForm({ ...form, type: t, toAccountId: "" })}
-                    style={{
-                      flex: 1, padding: "9px", borderRadius: 8, border: "none", cursor: "pointer", fontWeight: 600, fontSize: 13,
-                      background: form.type === t
-                        ? t === "INCOME" ? "rgba(52,211,153,0.25)" : t === "EXPENSE" ? "rgba(248,113,113,0.25)" : "rgba(148,163,184,0.25)"
-                        : "rgba(255,255,255,0.05)",
-                      color: form.type === t
-                        ? t === "INCOME" ? "#34d399" : t === "EXPENSE" ? "#f87171" : "#94a3b8"
-                        : "rgba(255,255,255,0.4)",
-                      outline: form.type === t ? "1px solid currentColor" : "1px solid transparent",
-                    }}>
-                    {t === "EXPENSE" ? "Expense" : t === "INCOME" ? "Income" : "Transfer"}
-                  </button>
-                ))}
-              </div>
-
-              <label style={labelStyle}>
-                Description
-                <input className="glass-input" style={{ ...fieldStyle, marginTop: 6 }} placeholder="What was this for?" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} autoFocus />
-              </label>
-
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-                <label style={labelStyle}>
-                  Amount
-                  <input className="glass-input" style={{ ...fieldStyle, marginTop: 6 }} type="number" min="0" step="0.01" placeholder="0.00" value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value })} />
-                </label>
-                <label style={labelStyle}>
-                  Date
-                  <input className="glass-input" style={{ ...fieldStyle, marginTop: 6 }} type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} />
-                </label>
-              </div>
-
-              {isTransfer ? (
-                <div style={{ display: "grid", gridTemplateColumns: "1fr auto 1fr", gap: 8, alignItems: "end" }}>
-                  <label style={labelStyle}>
-                    From account
-                    <select className="glass-input" style={{ ...fieldStyle, marginTop: 6 }} value={form.accountId} onChange={(e) => setForm({ ...form, accountId: e.target.value })}>
-                      <option value="">Select…</option>
-                      {accounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
-                    </select>
-                  </label>
-                  <div style={{ paddingBottom: 12, color: "rgba(255,255,255,0.3)", fontSize: 18, textAlign: "center" }}>→</div>
-                  <label style={labelStyle}>
-                    To account
-                    <select className="glass-input" style={{ ...fieldStyle, marginTop: 6 }} value={form.toAccountId} onChange={(e) => setForm({ ...form, toAccountId: e.target.value })}>
-                      <option value="">Select…</option>
-                      {accounts.filter((a) => a.id !== form.accountId).map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
-                    </select>
-                  </label>
+          <div className="tx-wizard glass-strong">
+            {/* Header: title, progress, close */}
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 6 }}>
+              <div>
+                <div style={{ fontSize: 12, color: "rgba(255,255,255,0.4)", fontWeight: 600 }}>
+                  {editing ? "Edit" : "Add"} transaction · step {step + 1} of 4
                 </div>
-              ) : (
-                <label style={labelStyle}>
-                  Account
-                  <select className="glass-input" style={{ ...fieldStyle, marginTop: 6 }} value={form.accountId} onChange={(e) => setForm({ ...form, accountId: e.target.value })}>
-                    <option value="">Select account…</option>
-                    {accounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
-                  </select>
-                </label>
-              )}
+                <h2 style={{ margin: "2px 0 0", fontSize: 19, fontWeight: 700 }}>{STEP_TITLES[step]}</h2>
+              </div>
+              <button onClick={() => setModal(false)} aria-label="Close" style={{ background: "none", border: "none", color: "rgba(255,255,255,0.4)", fontSize: 24, cursor: "pointer", lineHeight: 1, padding: 4 }}>×</button>
+            </div>
 
-              {investmentBlocked && (
-                <div style={{ padding: "12px 14px", borderRadius: 10, background: "rgba(129,140,248,0.1)", border: "1px solid rgba(129,140,248,0.3)", fontSize: 13, color: "#c7d2fe", lineHeight: 1.5 }}>
-                  <strong>{selectedAccount.name}</strong> is an investment account — its balance follows its holdings, so it only records transfers in and out. Buy and sell under <strong>Holdings</strong>.
-                  <button
-                    type="button"
-                    className="glass-btn glass-btn-ghost"
-                    style={{ padding: "5px 12px", fontSize: 12, marginTop: 8, display: "block" }}
-                    onClick={() => setForm({ ...form, type: "TRANSFER", toAccountId: "" })}
-                  >
-                    Switch to transfer
-                  </button>
+            {/* Progress dots */}
+            <div style={{ display: "flex", gap: 6, marginBottom: 20 }}>
+              {[0, 1, 2, 3].map((i) => (
+                <div key={i} onClick={() => i < step && setStep(i)}
+                  style={{ flex: 1, height: 4, borderRadius: 4, cursor: i < step ? "pointer" : "default",
+                    background: i <= step ? "linear-gradient(90deg, rgba(129,140,248,0.9), rgba(167,139,250,0.9))" : "rgba(255,255,255,0.1)" }} />
+              ))}
+            </div>
+
+            {/* Step body */}
+            <div className="tx-wizard-body">
+              {/* Step 0 — Type */}
+              {step === 0 && (
+                <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                  {[
+                    ["EXPENSE", "Expense", "Money going out", "#f87171", "rgba(248,113,113,0.15)"],
+                    ["INCOME", "Income", "Money coming in", "#34d399", "rgba(52,211,153,0.12)"],
+                    ["TRANSFER", "Transfer", "Between your own accounts", "#94a3b8", "rgba(148,163,184,0.15)"],
+                  ].map(([t, label, desc, color, bg]) => {
+                    const active = form.type === t;
+                    return (
+                      <button key={t} type="button" onClick={() => setForm({ ...form, type: t, toAccountId: "" })}
+                        style={{ textAlign: "left", padding: "16px 18px", borderRadius: 14, cursor: "pointer",
+                          border: `1px solid ${active ? color : "rgba(255,255,255,0.1)"}`,
+                          background: active ? bg : "rgba(255,255,255,0.03)" }}>
+                        <div style={{ fontSize: 16, fontWeight: 700, color: active ? color : "#e2e8f0" }}>{label}</div>
+                        <div style={{ fontSize: 13, color: "rgba(255,255,255,0.45)", marginTop: 2 }}>{desc}</div>
+                      </button>
+                    );
+                  })}
                 </div>
               )}
 
-              {!isTransfer && !investmentBlocked && (
-                <label style={labelStyle}>
-                  Category
-                  <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
-                    <select className="glass-input" style={{ ...fieldStyle, marginTop: 0, flex: 1 }} value={form.categoryId} onChange={(e) => setForm({ ...form, categoryId: e.target.value })}>
-                      <option value="">No category</option>
-                      {allCategories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-                    </select>
-                    <button type="button" className="glass-btn glass-btn-ghost" style={{ padding: "0 14px", whiteSpace: "nowrap" }} onClick={addCategory} title="Create a new category">
-                      + New
-                    </button>
-                  </div>
-                </label>
+              {/* Step 1 — Amount & date */}
+              {step === 1 && (
+                <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+                  <label style={labelStyle}>
+                    Amount
+                    <input className="glass-input" autoFocus type="number" inputMode="decimal" min="0" step="0.01" placeholder="0.00"
+                      style={{ ...fieldStyle, marginTop: 6, fontSize: 30, fontWeight: 700, padding: "14px 16px", textAlign: "center" }}
+                      value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value })}
+                      onKeyDown={(e) => { if (e.key === "Enter") goNext(); }} />
+                  </label>
+                  <label style={labelStyle}>
+                    Date
+                    <input className="glass-input" type="date" style={{ ...fieldStyle, marginTop: 6 }}
+                      value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} />
+                  </label>
+                </div>
               )}
 
-              {/* Turn this payment into a subscription without leaving the form.
-                  Only for new income/expense — recurring transfers aren't modelled. */}
-              {!isTransfer && !investmentBlocked && !editing && (
-                <div style={{ padding: "12px 14px", borderRadius: 10, background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)" }}>
-                  <label style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer", fontSize: 14 }}>
-                    <input type="checkbox" checked={form.recurring} onChange={(e) => setForm({ ...form, recurring: e.target.checked })} style={{ cursor: "pointer" }} />
-                    <span>Make this a subscription <span style={{ color: "rgba(255,255,255,0.4)" }}>— repeats automatically</span></span>
-                  </label>
-                  {form.recurring && (
-                    <div style={{ marginTop: 12 }}>
-                      <label style={{ ...labelStyle, marginBottom: 0 }}>
-                        Repeats
-                        <select className="glass-input" style={{ ...fieldStyle, marginTop: 6 }} value={form.frequency} onChange={(e) => setForm({ ...form, frequency: e.target.value })}>
-                          {FREQUENCIES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+              {/* Step 2 — Account(s) */}
+              {step === 2 && (
+                <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+                  {isTransfer ? (
+                    <>
+                      <label style={labelStyle}>
+                        From account <span style={{ color: "rgba(255,255,255,0.35)", fontWeight: 400 }}>— money leaves here</span>
+                        <select className="glass-input" style={{ ...fieldStyle, marginTop: 6 }} value={form.accountId} onChange={(e) => setForm({ ...form, accountId: e.target.value })}>
+                          <option value="">Select…</option>
+                          {accounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
                         </select>
                       </label>
-                      <div style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", marginTop: 6, lineHeight: 1.5 }}>
-                        This payment is recorded now; the next is scheduled for {format(new Date(nextPeriod(form.date, form.frequency)), "dd MMM yyyy")}. Manage it under Recurring.
-                      </div>
+                      <div style={{ textAlign: "center", color: "rgba(255,255,255,0.3)", fontSize: 20 }}>↓</div>
+                      <label style={labelStyle}>
+                        To account <span style={{ color: "rgba(255,255,255,0.35)", fontWeight: 400 }}>— money arrives here</span>
+                        <select className="glass-input" style={{ ...fieldStyle, marginTop: 6 }} value={form.toAccountId} onChange={(e) => setForm({ ...form, toAccountId: e.target.value })}>
+                          <option value="">Select…</option>
+                          {accounts.filter((a) => a.id !== form.accountId).map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+                        </select>
+                      </label>
+                    </>
+                  ) : (
+                    <label style={labelStyle}>
+                      Account
+                      <select className="glass-input" style={{ ...fieldStyle, marginTop: 6 }} value={form.accountId} onChange={(e) => setForm({ ...form, accountId: e.target.value })}>
+                        <option value="">Select account…</option>
+                        {accounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+                      </select>
+                    </label>
+                  )}
+
+                  {investmentBlocked && (
+                    <div style={{ padding: "12px 14px", borderRadius: 10, background: "rgba(129,140,248,0.1)", border: "1px solid rgba(129,140,248,0.3)", fontSize: 13, color: "#c7d2fe", lineHeight: 1.5 }}>
+                      <strong>{selectedAccount.name}</strong> is an investment account — it only records transfers in and out. Buy and sell under <strong>Holdings</strong>.
+                      <button type="button" className="glass-btn glass-btn-ghost" style={{ padding: "5px 12px", fontSize: 12, marginTop: 8, display: "block" }}
+                        onClick={() => setForm({ ...form, type: "TRANSFER", toAccountId: "" })}>
+                        Switch to transfer
+                      </button>
                     </div>
                   )}
                 </div>
               )}
 
-              <label style={labelStyle}>
-                Notes <span style={{ color: "rgba(255,255,255,0.3)", fontWeight: 400 }}>(optional)</span>
-                <textarea className="glass-input" style={{ ...fieldStyle, marginTop: 6, resize: "vertical", minHeight: 56 }} placeholder="Any extra details…" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
-              </label>
+              {/* Step 3 — Details */}
+              {step === 3 && (
+                <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+                  <label style={labelStyle}>
+                    Description
+                    <input className="glass-input" autoFocus style={{ ...fieldStyle, marginTop: 6 }} placeholder="What was this for?"
+                      value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />
+                  </label>
+
+                  {!isTransfer && (
+                    <label style={labelStyle}>
+                      Category
+                      <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
+                        <select className="glass-input" style={{ ...fieldStyle, marginTop: 0, flex: 1 }} value={form.categoryId} onChange={(e) => setForm({ ...form, categoryId: e.target.value })}>
+                          <option value="">No category</option>
+                          {allCategories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                        </select>
+                        <button type="button" className="glass-btn glass-btn-ghost" style={{ padding: "0 14px", whiteSpace: "nowrap" }} onClick={addCategory} title="Create a new category">
+                          + New
+                        </button>
+                      </div>
+                    </label>
+                  )}
+
+                  {!isTransfer && !editing && (
+                    <div style={{ padding: "12px 14px", borderRadius: 10, background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)" }}>
+                      <label style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer", fontSize: 14 }}>
+                        <input type="checkbox" checked={form.recurring} onChange={(e) => setForm({ ...form, recurring: e.target.checked })} style={{ cursor: "pointer", width: 16, height: 16 }} />
+                        <span>Make this a subscription <span style={{ color: "rgba(255,255,255,0.4)" }}>— repeats automatically</span></span>
+                      </label>
+                      {form.recurring && (
+                        <div style={{ marginTop: 12 }}>
+                          <label style={{ ...labelStyle, marginBottom: 0 }}>
+                            Repeats
+                            <select className="glass-input" style={{ ...fieldStyle, marginTop: 6 }} value={form.frequency} onChange={(e) => setForm({ ...form, frequency: e.target.value })}>
+                              {FREQUENCIES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                            </select>
+                          </label>
+                          <div style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", marginTop: 6, lineHeight: 1.5 }}>
+                            Recorded now; the next is scheduled for {format(new Date(nextPeriod(form.date, form.frequency)), "dd MMM yyyy")}. Manage it under Recurring.
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  <label style={labelStyle}>
+                    Notes <span style={{ color: "rgba(255,255,255,0.3)", fontWeight: 400 }}>(optional)</span>
+                    <textarea className="glass-input" style={{ ...fieldStyle, marginTop: 6, resize: "vertical", minHeight: 56 }} placeholder="Any extra details…" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
+                  </label>
+                </div>
+              )}
             </div>
 
             {saveError && (
-              <div style={{ marginTop: 16, padding: "10px 14px", borderRadius: 8, background: "rgba(239,68,68,0.15)", border: "1px solid rgba(239,68,68,0.3)", color: "#fca5a5", fontSize: 13 }}>
+              <div style={{ marginTop: 14, padding: "10px 14px", borderRadius: 8, background: "rgba(239,68,68,0.15)", border: "1px solid rgba(239,68,68,0.3)", color: "#fca5a5", fontSize: 13 }}>
                 {saveError}
               </div>
             )}
 
-            <div style={{ display: "flex", gap: 10, marginTop: 20, justifyContent: "flex-end" }}>
-              <button className="glass-btn glass-btn-ghost" style={{ padding: "10px 22px" }} onClick={() => setModal(false)}>Cancel</button>
-              <button className="glass-btn glass-btn-primary" style={{ padding: "10px 22px", opacity: (saving || investmentBlocked) ? 0.5 : 1 }} onClick={save} disabled={saving || investmentBlocked}>
-                {saving ? "Saving…" : "Save"}
+            {/* Footer nav */}
+            <div style={{ display: "flex", gap: 10, marginTop: 18, alignItems: "center" }}>
+              <button className="glass-btn glass-btn-ghost" style={{ padding: "12px 20px" }}
+                onClick={() => (step === 0 ? setModal(false) : goBack())}>
+                {step === 0 ? "Cancel" : "← Back"}
               </button>
+              <div style={{ flex: 1 }} />
+              {step < 3 ? (
+                <button className="glass-btn glass-btn-primary" style={{ padding: "12px 26px", opacity: stepValid(step) ? 1 : 0.5 }} onClick={goNext}>
+                  Next →
+                </button>
+              ) : (
+                <button className="glass-btn glass-btn-primary" style={{ padding: "12px 26px", opacity: (saving || !stepValid(3)) ? 0.6 : 1 }} onClick={save} disabled={saving || !stepValid(3)}>
+                  {saving ? "Saving…" : editing ? "Save changes" : "Add transaction"}
+                </button>
+              )}
             </div>
           </div>
         </div>

@@ -88,7 +88,7 @@ To actually get Watchtower auto-updates, images must be published (GitHub Action
 
 `backend/package.json` `version` is the **single source of truth** — bump it on
 every meaningful change (keep `frontend/package.json` in sync for tidiness).
-Currently **1.30.1**.
+Currently **1.31.0**.
 
 - `GET /version` → `{ version, buildTime }` (authenticated)
 - `GET /version/check` → compares against the `version` in `backend/package.json`
@@ -665,6 +665,17 @@ layout-critical sizing was moved into CSS classes in `index.css` that a
   payments, AI review) got `overflowX: auto` + a table `minWidth`. `body` is
   `overflow-x: hidden` on mobile so nothing bleeds past the viewport.
 - `index.html` carries the viewport meta (already present) plus `theme-color`.
+- Inputs are `font-size: 16px` on mobile so iOS Safari doesn't zoom in on focus.
+
+**Add/Edit transaction wizard (v1.31.0).** The old single dense form became a
+4-step wizard in `Transactions.jsx` (`step` state, `STEP_TITLES`, `stepValid` /
+`stepMsg` / `goNext` / `goBack`): **0 Type · 1 Amount & date · 2 Account(s) ·
+3 Details** (description, category with "+ New", subscription toggle, notes).
+`.tx-wizard` is a centered ~500px card on desktop and **full-screen on mobile**
+(100dvh, no radius); `.tx-wizard-body` scrolls. Each step gates Next with
+`stepValid`; the investment-account block and "switch to transfer" live on step 2;
+`save()` still does the final full validation. All prior behaviour is preserved
+(remembered account, inline category, subscription, edit mode → "Save changes").
 
 ## Conventions
 
