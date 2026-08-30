@@ -88,7 +88,7 @@ To actually get Watchtower auto-updates, images must be published (GitHub Action
 
 `backend/package.json` `version` is the **single source of truth** — bump it on
 every meaningful change (keep `frontend/package.json` in sync for tidiness).
-Currently **1.32.0**.
+Currently **1.33.0**.
 
 - `GET /version` → `{ version, buildTime }` (authenticated)
 - `GET /version/check` → compares against the `version` in `backend/package.json`
@@ -563,6 +563,13 @@ including `type` and `groupName`) and `GET /stats/monthly`.
   `/transactions?type=EXPENSE&categoryId=<id|none>`. The Transactions page seeds
   its `categoryId`/`type` filters from those query params (it already did so for
   `accountId`), so the deep link lands on that category's transactions.
+- **Every widget drills down on click (v1.33.0)**: stat tiles → accounts or
+  `/transactions?type=`; monthly bars → that bucket's transactions
+  (`bucketRange` turns a `YYYY-MM`/`YYYY` key into `from`/`to`); recent-tx and
+  account-group rows → that account; goals/investments/savings/subscriptions →
+  their pages. Transactions now also reads `from`/`to` from the URL and shows a
+  clearable date-range chip. Click-through is dead in edit mode (the edit overlay
+  captures clicks).
 
 ## Dashboard time range
 

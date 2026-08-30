@@ -237,9 +237,11 @@ export default function Transactions() {
   const [filters, setFilters] = useState({
     search: "",
     accountId: searchParams.get("accountId") || "",
-    // Deep-linked from the dashboard "Spending by Category" chart, etc.
+    // Deep-linked from the dashboard widgets (category pie, monthly bars, stats…).
     categoryId: searchParams.get("categoryId") || "",
     type: searchParams.get("type") || "",
+    from: searchParams.get("from") || "",
+    to: searchParams.get("to") || "",
     page: 1,
   });
 
@@ -460,6 +462,16 @@ export default function Transactions() {
             {allCategories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
           </select>
         </div>
+        {(filters.from || filters.to) && (
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 12, fontSize: 13, color: "#c7d2fe" }}>
+            <span style={{ background: "rgba(129,140,248,0.18)", border: "1px solid rgba(129,140,248,0.35)", borderRadius: 999, padding: "4px 12px" }}>
+              📅 {filters.from ? format(new Date(filters.from), "dd MMM yyyy") : "…"} – {filters.to ? format(new Date(filters.to), "dd MMM yyyy") : "…"}
+            </span>
+            <button className="glass-btn glass-btn-ghost" style={{ padding: "4px 12px", fontSize: 12 }} onClick={() => setFilters({ ...filters, from: "", to: "", page: 1 })}>
+              Clear dates
+            </button>
+          </div>
+        )}
       </GlassCard>
 
       {/* Bulk action bar */}

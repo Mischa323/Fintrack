@@ -204,11 +204,20 @@ const STAT_CONFIG = {
   "stat-netflow":  { key: d => (d.totalIncome || 0) - (d.totalExpenses || 0), label: "Net Flow", color: "#60a5fa", bg: "rgba(96,165,250,0.10)" },
 };
 
+// Where each stat tile drills down to when clicked.
+const STAT_LINKS = {
+  "stat-balance": "/accounts",
+  "stat-income": "/transactions?type=INCOME",
+  "stat-expenses": "/transactions?type=EXPENSE",
+  "stat-netflow": "/transactions",
+};
+
 function StatWidgetContent({ type, overview }) {
+  const navigate = useNavigate();
   const cfg = STAT_CONFIG[type];
   const val = overview ? cfg.key(overview) : null;
   return (
-    <div style={{ background: cfg.bg, borderRadius: 16, padding: "20px 22px", height: "100%", boxSizing: "border-box" }}>
+    <div onClick={() => navigate(STAT_LINKS[type])} style={{ background: cfg.bg, borderRadius: 16, padding: "20px 22px", height: "100%", boxSizing: "border-box", cursor: "pointer" }}>
       <div style={{ fontSize: 12, color: "rgba(255,255,255,0.5)", marginBottom: 10, fontWeight: 500 }}>{cfg.label}</div>
       {val === null
         ? <div style={{ height: 36, background: "rgba(255,255,255,0.06)", borderRadius: 8, width: "70%" }} />
@@ -228,7 +237,28 @@ const ChartTooltip = ({ active, payload, label }) => {
   );
 };
 
+// The monthly buckets are keyed "YYYY-MM" (or "YYYY" for long ranges); turn one
+// into a from/to pair so a bar click deep-links to that period's transactions.
+function bucketRange(key) {
+  if (/^\d{4}-\d{2}$/.test(key)) {
+    const [y, m] = key.split("-").map(Number);
+    return { from: new Date(Date.UTC(y, m - 1, 1)).toISOString(), to: new Date(Date.UTC(y, m, 0, 23, 59, 59)).toISOString() };
+  }
+  if (/^\d{4}$/.test(key)) {
+    const y = Number(key);
+    return { from: new Date(Date.UTC(y, 0, 1)).toISOString(), to: new Date(Date.UTC(y, 11, 31, 23, 59, 59)).toISOString() };
+  }
+  return null;
+}
+
 function MonthlyChartContent({ monthly }) {
+  const navigate = useNavigate();
+  const openBucket = (entry, type) => {
+    const key = entry?.month || entry?.payload?.month;
+    const range = bucketRange(key);
+    if (!range) return;
+    navigate(`/transactions?type=${type}&from=${encodeURIComponent(range.from)}&to=${encodeURIComponent(range.to)}`);
+  };
   return (
     <div style={{ height: "100%", minHeight: 200 }}>
       <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 12 }}>Income vs Expenses</div>
@@ -236,11 +266,14 @@ function MonthlyChartContent({ monthly }) {
         <BarChart data={monthly} barGap={4}>
           <XAxis dataKey="month" tick={{ fill: "#64748b", fontSize: 11 }} axisLine={false} tickLine={false} />
           <YAxis tick={{ fill: "#64748b", fontSize: 11 }} axisLine={false} tickLine={false} tickFormatter={v => `€${(v / 1000).toFixed(0)}k`} />
-          <Tooltip content={<ChartTooltip />} />
-          <Bar dataKey="income"   name="Income"   fill="#34d399" radius={[6,6,0,0]} opacity={0.85} />
-          <Bar dataKey="expenses" name="Expenses" fill="#f87171" radius={[6,6,0,0]} opacity={0.85} />
+          <Tooltip content={<ChartTooltip />} cursor={{ fill: "rgba(255,255,255,0.05)" }} />
+          <Bar dataKey="income"   name="Income"   fill="#34d399" radius={[6,6,0,0]} opacity={0.85} cursor="pointer" onClick={(e) => openBucket(e, "INCOME")} />
+          <Bar dataKey="expenses" name="Expenses" fill="#f87171" radius={[6,6,0,0]} opacity={0.85} cursor="pointer" onClick={(e) => openBucket(e, "EXPENSE")} />
         </BarChart>
       </ResponsiveContainer>
+      <div style={{ fontSize: 11, color: "rgba(255,255,255,0.3)", textAlign: "center", marginTop: 2 }}>
+        Tip: tap a bar to see that month's transactions
+      </div>
     </div>
   );
 }
@@ -317,7 +350,7 @@ function RecentTxContent() {
         : (
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
             {txs.map(t => (
-              <div key={t.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 0", borderBottom: "1px solid rgba(255,255,255,0.05)" }}>
+              <div key={t.id} onClick={() => navigate(`/transactions?accountId=${t.accountId}`)} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 0", borderBottom: "1px solid rgba(255,255,255,0.05)", cursor: "pointer" }}>
                 <div>
                   <div style={{ fontSize: 13, fontWeight: 500 }}>{t.description}</div>
                   <div style={{ fontSize: 11, color: "rgba(255,255,255,0.35)", marginTop: 2 }}>{t.category?.name || "—"} · {new Date(t.date).toLocaleDateString("nl-NL")}</div>
@@ -336,10 +369,11 @@ function RecentTxContent() {
 }
 
 function GoalsWidgetContent() {
+  const navigate = useNavigate();
   const [goalList, setGoalList] = useState([]);
   useEffect(() => { goalsApi.list().then(setGoalList).catch(() => {}); }, []);
   return (
-    <div>
+    <div onClick={() => navigate("/goals")} style={{ cursor: "pointer" }}>
       <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 14 }}>Goals</div>
       {goalList.length === 0
         ? <div style={{ color: "rgba(255,255,255,0.3)", fontSize: 13 }}>No goals set</div>
@@ -380,6 +414,7 @@ function resolveGroupAccounts(accounts, config = {}) {
 }
 
 function AccountGroupContent({ widget, overview }) {
+  const navigate = useNavigate();
   const { config = {} } = widget;
   const allAccounts = overview?.accounts || [];
   const filtered = resolveGroupAccounts(allAccounts, config);
@@ -390,12 +425,14 @@ function AccountGroupContent({ widget, overview }) {
 
   return (
     <div style={{ background: `rgba(${hexToRgb(color)}, 0.12)`, borderRadius: 16, padding: "20px 22px", height: "100%", boxSizing: "border-box" }}>
-      <div style={{ fontSize: 12, color: "rgba(255,255,255,0.5)", marginBottom: 10, fontWeight: 500 }}>{label}</div>
-      <div style={{ fontSize: 28, fontWeight: 700, color }}>{fmt(total)}</div>
+      <div onClick={() => navigate("/accounts")} style={{ cursor: "pointer" }}>
+        <div style={{ fontSize: 12, color: "rgba(255,255,255,0.5)", marginBottom: 10, fontWeight: 500 }}>{label}</div>
+        <div style={{ fontSize: 28, fontWeight: 700, color }}>{fmt(total)}</div>
+      </div>
       {showIndividual && filtered.length > 0 && (
         <div style={{ marginTop: 14, display: "flex", flexDirection: "column", gap: 7 }}>
           {filtered.map(a => (
-            <div key={a.id} style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "rgba(255,255,255,0.5)" }}>
+            <div key={a.id} onClick={() => navigate(`/transactions?accountId=${a.id}`)} style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "rgba(255,255,255,0.5)", cursor: "pointer" }}>
               <span style={{ borderLeft: `2px solid ${a.color}`, paddingLeft: 7 }}>{a.name}</span>
               <span style={{ color: Number(a.balance) >= 0 ? "#34d399" : "#f87171", fontWeight: 600 }}>{fmt(Number(a.balance))}</span>
             </div>
@@ -554,6 +591,7 @@ function AccountGroupConfigModal({ initialConfig = {}, accounts = [], onSave, on
 // Uses the same /holdings/history endpoint as the Holdings modal, so it works for
 // ticker-priced accounts and manually-valued (fund/pension) ones alike.
 function InvestmentsWidgetContent({ overview }) {
+  const navigate = useNavigate();
   const invAccounts = (overview?.accounts || []).filter(a => a.type === "INVESTMENT");
   const [sel, setSel] = useState("");
   const [range, setRange] = useState("6mo");
@@ -586,7 +624,7 @@ function InvestmentsWidgetContent({ overview }) {
 
   return (
     <div>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", flexWrap: "wrap", gap: 8, marginBottom: 12 }}>
+      <div onClick={() => navigate("/accounts")} style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", flexWrap: "wrap", gap: 8, marginBottom: 12, cursor: "pointer" }}>
         <div style={{ fontSize: 14, fontWeight: 600 }}>Investments</div>
         <div style={{ fontSize: 18, fontWeight: 700, color: "#34d399" }}>{fmt(totalValue)}</div>
       </div>
@@ -650,7 +688,7 @@ function UpcomingRecurringContent() {
         : (
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
             {upcoming.map(r => (
-              <div key={r.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 0", borderBottom: "1px solid rgba(255,255,255,0.05)" }}>
+              <div key={r.id} onClick={() => navigate("/recurring")} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 0", borderBottom: "1px solid rgba(255,255,255,0.05)", cursor: "pointer" }}>
                 <div>
                   <div style={{ fontSize: 13, fontWeight: 500 }}>{r.description}</div>
                   <div style={{ fontSize: 11, color: "rgba(255,255,255,0.35)", marginTop: 2 }}>{r.frequency.toLowerCase()} · next {new Date(r.nextDate).toLocaleDateString("nl-NL")}</div>
@@ -666,12 +704,13 @@ function UpcomingRecurringContent() {
 }
 
 function SavingsRateContent({ overview }) {
+  const navigate = useNavigate();
   const income = overview?.totalIncome || 0;
   const expenses = overview?.totalExpenses || 0;
   const rate = income > 0 ? ((income - expenses) / income) * 100 : null;
   const good = rate != null && rate >= 0;
   return (
-    <div style={{ background: "rgba(52,211,153,0.10)", borderRadius: 16, padding: "20px 22px", height: "100%", boxSizing: "border-box" }}>
+    <div onClick={() => navigate("/transactions")} style={{ background: "rgba(52,211,153,0.10)", borderRadius: 16, padding: "20px 22px", height: "100%", boxSizing: "border-box", cursor: "pointer" }}>
       <div style={{ fontSize: 12, color: "rgba(255,255,255,0.5)", marginBottom: 10, fontWeight: 500 }}>Savings Rate</div>
       <div style={{ fontSize: 28, fontWeight: 700, color: rate == null ? "rgba(255,255,255,0.4)" : good ? "#34d399" : "#f87171" }}>
         {rate == null ? "—" : `${rate.toFixed(0)}%`}
