@@ -88,7 +88,7 @@ To actually get Watchtower auto-updates, images must be published (GitHub Action
 
 `backend/package.json` `version` is the **single source of truth** — bump it on
 every meaningful change (keep `frontend/package.json` in sync for tidiness).
-Currently **1.31.0**.
+Currently **1.32.0**.
 
 - `GET /version` → `{ version, buildTime }` (authenticated)
 - `GET /version/check` → compares against the `version` in `backend/package.json`
@@ -559,6 +559,10 @@ including `type` and `groupName`) and `GET /stats/monthly`.
 - **Other v1.27.0 widgets**: Money Lent (outstanding, from `/loans/summary`),
   Upcoming Subscriptions (active recurring by next date + a ~/month estimate),
   Savings Rate ((income−expenses)/income over the range).
+- **Spending-by-Category pie is clickable (v1.32.0)**: a slice navigates to
+  `/transactions?type=EXPENSE&categoryId=<id|none>`. The Transactions page seeds
+  its `categoryId`/`type` filters from those query params (it already did so for
+  `accountId`), so the deep link lands on that category's transactions.
 
 ## Dashboard time range
 

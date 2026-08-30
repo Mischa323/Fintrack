@@ -246,7 +246,17 @@ function MonthlyChartContent({ monthly }) {
 }
 
 function CategoryChartContent({ overview }) {
+  const navigate = useNavigate();
   const data = overview?.spendingByCategory || [];
+
+  // Click a slice to see every transaction in that category (uncategorized has no
+  // id, so it uses the "none" filter the Transactions page understands).
+  const openCategory = (entry) => {
+    const cat = entry?.category || entry?.payload?.category;
+    if (!cat) return;
+    navigate(`/transactions?type=EXPENSE&categoryId=${cat.id || "none"}`);
+  };
+
   return (
     <div style={{ height: "100%", minHeight: 200 }}>
       <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 12 }}>Spending by Category</div>
@@ -255,14 +265,18 @@ function CategoryChartContent({ overview }) {
         : (
           <ResponsiveContainer width="100%" height={200}>
             <PieChart>
-              <Pie data={data} dataKey="amount" nameKey="category.name" cx="50%" cy="50%" innerRadius={50} outerRadius={80} paddingAngle={3}>
-                {data.map((e, i) => <Cell key={i} fill={e.category?.color || "#6b7280"} opacity={0.85} />)}
+              <Pie data={data} dataKey="amount" nameKey="category.name" cx="50%" cy="50%" innerRadius={50} outerRadius={80} paddingAngle={3}
+                onClick={openCategory} style={{ cursor: "pointer", outline: "none" }}>
+                {data.map((e, i) => <Cell key={i} fill={e.category?.color || "#6b7280"} opacity={0.85} style={{ cursor: "pointer", outline: "none" }} />)}
               </Pie>
               <Tooltip formatter={v => fmt(v)} />
             </PieChart>
           </ResponsiveContainer>
         )
       }
+      <div style={{ fontSize: 11, color: "rgba(255,255,255,0.3)", textAlign: "center", marginTop: 4 }}>
+        Tip: tap a slice to see its transactions
+      </div>
     </div>
   );
 }

@@ -234,7 +234,14 @@ export default function Transactions() {
   const [bulkMsg, setBulkMsg] = useState(null);
   const [aiFor, setAiFor] = useState(null);
   const [searchParams] = useSearchParams();
-  const [filters, setFilters] = useState({ search: "", accountId: searchParams.get("accountId") || "", categoryId: "", type: "", page: 1 });
+  const [filters, setFilters] = useState({
+    search: "",
+    accountId: searchParams.get("accountId") || "",
+    // Deep-linked from the dashboard "Spending by Category" chart, etc.
+    categoryId: searchParams.get("categoryId") || "",
+    type: searchParams.get("type") || "",
+    page: 1,
+  });
 
   const load = useCallback(() => {
     txApi.list({ ...filters, limit: 50 }).then(setData);
