@@ -17,6 +17,26 @@ const {
 const router = express.Router();
 const prisma = new PrismaClient();
 
+// Recalculate every account an import touched, not just the one picked in the
+// wizard. Transfer detection writes the *other* account onto TRANSFER rows
+// (accountId when money comes in, toAccountId when it goes out); recalculating
+// only the target left those accounts stale — diagnosed live: a CAMT import of
+// the current account moved €4,285 on the savings account and €5,430 onto
+// Revolut without either stored balance changing.
+async function recalculateTouched(since, extraIds = []) {
+  const rows = await prisma.transaction.findMany({
+    where: { createdAt: { gte: since } },
+    select: { accountId: true, toAccountId: true },
+  });
+  const ids = new Set(extraIds.filter(Boolean));
+  for (const r of rows) {
+    ids.add(r.accountId);
+    if (r.toAccountId) ids.add(r.toAccountId);
+  }
+  for (const id of ids) await recalculateBalance(id);
+  return [...ids];
+}
+
 const upload = multer({ dest: path.join(__dirname, "../../uploads") });
 
 // Parse Maybe Finance CSV export format.
@@ -310,6 +330,7 @@ router.post("/maybe", upload.single("file"), async (req, res) => {
     try { fs.unlinkSync(req.file.path); } catch {}
   }
 
+  const importStartedAt = new Date();
   const { parsed, skipped: parseSkipped, errors } = parseAll(rows, parseMaybeRow);
   const mapByKey = new Map(Object.entries(accountMap).map(([k, v]) => [nameKey(k), v]));
 
@@ -349,11 +370,9 @@ router.post("/maybe", upload.single("file"), async (req, res) => {
 
   // Balance follows from openingBalance + recorded movements, so it has to be
   // re-derived once new movements land.
-  for (const id of new Set(perAccount.map((p) => p.accountId))) {
-    await recalculateBalance(id);
-  }
+  const recalculated = await recalculateTouched(importStartedAt, perAccount.map((p) => p.accountId));
 
-  res.json({ ...totals, errors: totals.errors.slice(0, 10), perAccount });
+  res.json({ ...totals, errors: totals.errors.slice(0, 10), perAccount, recalculatedAccounts: recalculated.length });
 });
 
 router.post("/generic", upload.single("file"), async (req, res) => {
@@ -361,9 +380,12 @@ router.post("/generic", upload.single("file"), async (req, res) => {
   if (!accountId) return res.status(400).json({ error: "accountId required" });
   if (!req.file) return res.status(400).json({ error: "CSV file required" });
 
+  const importStartedAt = new Date();
   const results = await importCsv(req.file.path, accountId, parseGenericRow, "generic");
   fs.unlinkSync(req.file.path);
-  res.json(results);
+  // Previously no recalculation at all, so a generic import never moved the balance
+  const recalculated = await recalculateTouched(importStartedAt, [accountId]);
+  res.json({ ...results, recalculatedAccounts: recalculated.length });
 });
 
 // ABN AMRO hands out one small file per day, so every CAMT endpoint takes a
@@ -454,6 +476,7 @@ router.post("/camt", upload.array("files", 400), async (req, res) => {
     ? req.body.transferMode
     : await getDefaultMode();
 
+  const importStartedAt = new Date();
   let rows = batch.entries;
   let linked = 0;
   let mirrorsSkipped = 0;
@@ -469,10 +492,11 @@ router.post("/camt", upload.array("files", 400), async (req, res) => {
   // In confirm mode, show what could be merged rather than doing it silently.
   const candidates = mode === "confirm" ? await findTransferCandidates() : [];
 
-  await recalculateBalance(accountId);
+  const recalculated = await recalculateTouched(importStartedAt, [accountId]);
 
   res.json({
     ...results,
+    recalculatedAccounts: recalculated.length,
     skipped: results.skipped + mirrorsSkipped,
     fileCount: files.length,
     iban: batch.ibans[0] || null,
@@ -499,7 +523,15 @@ router.post("/transfers/convert", async (req, res) => {
   const { id } = req.body;
   if (!id) return res.status(400).json({ error: "id required" });
   try {
-    res.json(await convertCandidate(id));
+    const before = await prisma.transaction.findUnique({ where: { id }, select: { accountId: true } });
+    const result = await convertCandidate(id);
+    // Converting moves an incoming row onto the paying account, so both sides
+    // need re-deriving; this was never done before.
+    const after = await prisma.transaction.findUnique({ where: { id }, select: { accountId: true, toAccountId: true } });
+    for (const acc of new Set([before?.accountId, after?.accountId, after?.toAccountId].filter(Boolean))) {
+      await recalculateBalance(acc);
+    }
+    res.json(result);
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
@@ -512,7 +544,10 @@ router.post("/transfers/merge", async (req, res) => {
     return res.status(400).json({ error: "outgoingId and incomingId required" });
   }
   try {
-    res.json(await mergeCandidate(outgoingId, incomingId));
+    const legs = await prisma.transaction.findMany({ where: { id: { in: [outgoingId, incomingId] } }, select: { accountId: true } });
+    const result = await mergeCandidate(outgoingId, incomingId);
+    for (const acc of new Set(legs.map((l) => l.accountId))) await recalculateBalance(acc);
+    res.json(result);
   } catch (err) {
     res.status(400).json({ error: err.message });
   }

@@ -49,13 +49,17 @@ function accountSummaries({ accounts, transactions, holdings }) {
     const bySource = {};
     const byType = {};
     let negative = 0, zero = 0, future = 0, transferNoTarget = 0, uncategorized = 0;
+    let ownActivityAfterAnchor = 0; // income/expense on this account after the checkpoint
     let minDate = null, maxDate = null;
 
     for (const t of rows) {
       const eff = effectOn(t, a.id);
       const ts = new Date(t.date).getTime();
       if (anchor !== null && ts <= anchor) { excluded += eff; excludedN++; }
-      else { counted += eff; countedN++; }
+      else {
+        counted += eff; countedN++;
+        if (t.accountId === a.id && t.type !== "TRANSFER") ownActivityAfterAnchor++;
+      }
 
       if (t.toAccountId === a.id) transferIn += t.amount;
       else if (t.type === "INCOME") income += t.amount;
@@ -119,6 +123,10 @@ function accountSummaries({ accounts, transactions, holdings }) {
         recomputedBalance: round(opening + counted),
         drift: round(stored - (opening + counted)),
         everythingSummed: round(opening + counted + excluded),
+        // Rows after the checkpoint that came from this account's own statement.
+        // Zero while transfers keep arriving means its own payments/interest
+        // since then aren't imported, so recomputing alone can't be the truth.
+        ownActivityAfterAnchor,
       };
     }
     return summary;
@@ -143,6 +151,11 @@ function exactDuplicates(transactions, accountId) {
     count: g.length,
     sources: [...new Set(g.map(sourceOf))],
     ids: g.map((t) => ({ id: t.id, externalId: t.externalId, source: sourceOf(t), createdAt: t.createdAt })),
+    // Each row carries its own bank reference from one source: the bank booked
+    // them separately, so most likely two real payments, not one imported twice.
+    distinctBankRefs: g.every((t) => t.externalId)
+      && new Set(g.map((t) => t.externalId)).size === g.length
+      && new Set(g.map(sourceOf)).size === 1,
   }));
 }
 
@@ -225,6 +238,36 @@ function unlinkedTransfers({ accounts, transactions }) {
   return pairs;
 }
 
+// A transfer X→Y that is *also* present as a loose row: income on Y or expense
+// on X, same amount, ±4 days — or the same bank reference stored twice. A loose
+// row only counts when its counterparty IBAN is the other account's: a
+// same-amount coincidence (a €40 lottery ticket next to a €40 top-up) is not
+// evidence.
+function transferMirrors({ accounts, transactions }) {
+  const norm = (x) => (x ? String(x).replace(/\s/g, "").toUpperCase() : null);
+  const ibanOf = new Map(accounts.filter((a) => a.iban).map((a) => [a.id, norm(a.iban)]));
+  const out = [];
+  const used = new Set();
+  for (const t of transactions) {
+    if (t.type !== "TRANSFER" || !t.toAccountId || used.has(t.id)) continue;
+    for (const r of transactions) {
+      if (r.id === t.id || used.has(r.id) || Math.abs(r.amount - t.amount) > 0.005) continue;
+      if (Math.abs(new Date(r.date) - new Date(t.date)) > 4 * DAY) continue;
+      let kind = null;
+      if (r.type === "INCOME" && r.accountId === t.toAccountId && norm(r.counterpartyIban) === ibanOf.get(t.accountId)) kind = "income-on-target";
+      else if (r.type === "EXPENSE" && r.accountId === t.accountId && norm(r.counterpartyIban) === ibanOf.get(t.toAccountId)) kind = "expense-on-source";
+      else if (r.type === "TRANSFER" && r.accountId === t.accountId && r.toAccountId === t.toAccountId
+        && r.externalId && r.externalId === t.externalId) kind = "same-transfer-twice";
+      if (!kind) continue;
+      used.add(r.id);
+      out.push({ kind, amount: t.amount,
+        transfer: { id: t.id, date: dayKey(t.date), from: t.accountId, to: t.toAccountId, description: t.description, source: sourceOf(t) },
+        mirror: { id: r.id, date: dayKey(r.date), accountId: r.accountId, type: r.type, description: r.description, source: sourceOf(r) } });
+    }
+  }
+  return out;
+}
+
 // Rows created close together by the same source on the same account are one
 // import run; a gap of more than five minutes starts a new one.
 function importBatches(transactions, accountId) {
@@ -261,14 +304,18 @@ function importBatches(transactions, accountId) {
 }
 
 // Turn the numbers into plain-language findings, worst first.
-function findings(summaries, dupes, cross, transfers) {
+function findings(summaries, dupes, cross, transfers, mirrors = []) {
   const out = [];
   const nameOf = new Map(summaries.map((s) => [s.id, s.name]));
   for (const s of summaries) {
     const bc = s.balanceCheck;
     if (bc && Math.abs(bc.drift) >= 0.01) {
+      const onlyTransfers = s.openingBalanceDate && bc.countedRows > 0 && bc.ownActivityAfterAnchor === 0;
       out.push({ severity: "high", account: s.name, issue: "balance-drift",
-        detail: `Stored balance ${s.storedBalance} ≠ recomputed ${bc.recomputedBalance} (drift ${bc.drift}). The ↻ button on the account would correct it.` });
+        detail: `Stored balance ${s.storedBalance} ≠ recomputed ${bc.recomputedBalance} (drift ${bc.drift}). `
+          + (onlyTransfers
+            ? `Everything after the checkpoint (${bc.countedRows} rows) is transfers imported from other accounts' statements — this account's own payments/interest since then aren't imported, so ↻ alone may not give the real balance. Compare with the bank and use "Set balance".`
+            : "The ↻ button on the account would correct it.") });
     }
     if (bc && bc.excludedRows > 0) {
       out.push({ severity: "info", account: s.name, issue: "before-anchor",
@@ -280,9 +327,15 @@ function findings(summaries, dupes, cross, transfers) {
     if (an.futureDated) out.push({ severity: "medium", account: s.name, issue: "future-dated", detail: `${an.futureDated} rows are dated in the future.` });
   }
   const dupByAcc = {};
-  for (const d of dupes) dupByAcc[d.accountId] = (dupByAcc[d.accountId] || 0) + d.count - 1;
-  for (const [id, n] of Object.entries(dupByAcc)) {
-    out.push({ severity: "high", account: nameOf.get(id), issue: "exact-duplicates", detail: `${n} extra rows share date, amount, type and description with another row (possible double import — or genuinely identical purchases).` });
+  for (const d of dupes) {
+    const k = `${d.accountId}|${d.distinctBankRefs ? "refs" : "suspect"}`;
+    dupByAcc[k] = (dupByAcc[k] || 0) + d.count - 1;
+  }
+  for (const [k, n] of Object.entries(dupByAcc)) {
+    const [id, kind] = k.split("|");
+    out.push(kind === "refs"
+      ? { severity: "info", account: nameOf.get(id), issue: "identical-rows-distinct-refs", detail: `${n} rows look identical to another (date, amount, description) but carry different bank references — most likely real separate payments, not a double import.` }
+      : { severity: "high", account: nameOf.get(id), issue: "exact-duplicates", detail: `${n} extra rows share date, amount, type and description with another row without distinct bank references — likely imported twice.` });
   }
   const crossByAcc = {};
   for (const p of cross) crossByAcc[p.accountId] = (crossByAcc[p.accountId] || 0) + 1;
@@ -292,6 +345,9 @@ function findings(summaries, dupes, cross, transfers) {
   if (transfers.length) {
     const strong = transfers.filter((t) => t.strength === "iban").length;
     out.push({ severity: "medium", account: null, issue: "unlinked-transfers", detail: `${transfers.length} expense/income pairs between your own accounts look like transfers (${strong} confirmed by IBAN). They inflate both income and expense totals.` });
+  }
+  if (mirrors.length) {
+    out.push({ severity: "high", account: null, issue: "transfer-counted-twice", detail: `${mirrors.length} transfers also exist as a loose income/expense row on one side (confirmed by IBAN) — that side counts the money twice.` });
   }
   const rank = { high: 0, medium: 1, info: 2 };
   return out.sort((a, b) => rank[a.severity] - rank[b.severity]);
@@ -303,19 +359,21 @@ async function buildReport({ accountId, limit = 200 } = {}) {
   const dupes = exactDuplicates(data.transactions, accountId);
   const cross = crossSourceDuplicates(data.transactions, accountId);
   const transfers = unlinkedTransfers(data);
+  const mirrors = transferMirrors(data);
   return {
     generatedAt: new Date().toISOString(),
     counts: { accounts: data.accounts.length, transactions: data.transactions.length },
-    findings: findings(summaries, dupes, cross, transfers),
+    findings: findings(summaries, dupes, cross, transfers, mirrors),
     accounts: accountId ? summaries.filter((s) => s.id === accountId) : summaries,
     imports: importBatches(data.transactions, accountId),
     duplicates: dupes.slice(0, limit),
     crossSourceDuplicates: cross.slice(0, limit),
     unlinkedTransfers: transfers.slice(0, limit),
+    transferMirrors: mirrors.slice(0, limit),
   };
 }
 
 module.exports = {
   loadAll, accountSummaries, exactDuplicates, crossSourceDuplicates,
-  unlinkedTransfers, importBatches, findings, buildReport,
+  unlinkedTransfers, transferMirrors, importBatches, findings, buildReport,
 };

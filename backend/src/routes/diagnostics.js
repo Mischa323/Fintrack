@@ -47,7 +47,7 @@ router.get("/", (req, res) => {
       "/diagnostics/summary": "Per-account balance check, sources, anomalies + plain-language findings",
       "/diagnostics/imports?accountId=": "Import runs per account and source (rows, date span, sums)",
       "/diagnostics/duplicates?accountId=&limit=": "Exact duplicates and cross-source twins",
-      "/diagnostics/transfers?limit=": "Expense/income pairs between own accounts that look like unlinked transfers",
+      "/diagnostics/transfers?limit=": "Expense/income pairs between own accounts that look like unlinked transfers, plus transfers also stored as a loose income/expense row (counted twice)",
       "/diagnostics/transactions?accountId=&from=&to=&q=&source=&type=&limit=&offset=": "Raw rows incl. externalId, source, createdAt",
       "/diagnostics/report?accountId=": "Everything above in one document",
     },
@@ -60,10 +60,11 @@ router.get("/summary", async (req, res) => {
   const dupes = diag.exactDuplicates(data.transactions);
   const cross = diag.crossSourceDuplicates(data.transactions);
   const transfers = diag.unlinkedTransfers(data);
+  const mirrors = diag.transferMirrors(data);
   res.json({
     generatedAt: new Date().toISOString(),
     counts: { accounts: data.accounts.length, transactions: data.transactions.length },
-    findings: diag.findings(summaries, dupes, cross, transfers),
+    findings: diag.findings(summaries, dupes, cross, transfers, mirrors),
     accounts: summaries,
   });
 });
@@ -84,8 +85,10 @@ router.get("/duplicates", async (req, res) => {
 
 router.get("/transfers", async (req, res) => {
   const limit = Math.min(Number(req.query.limit) || 200, 2000);
-  const pairs = diag.unlinkedTransfers(await diag.loadAll());
-  res.json({ count: pairs.length, pairs: pairs.slice(0, limit) });
+  const data = await diag.loadAll();
+  const pairs = diag.unlinkedTransfers(data);
+  const mirrors = diag.transferMirrors(data);
+  res.json({ count: pairs.length, pairs: pairs.slice(0, limit), mirrorCount: mirrors.length, mirrors: mirrors.slice(0, limit) });
 });
 
 router.get("/transactions", async (req, res) => {

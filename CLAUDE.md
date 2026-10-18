@@ -88,7 +88,7 @@ To actually get Watchtower auto-updates, images must be published (GitHub Action
 
 `backend/package.json` `version` is the **single source of truth** — bump it on
 every meaningful change (keep `frontend/package.json` in sync for tidiness).
-Currently **1.34.0**.
+Currently **1.34.1**.
 
 - `GET /version` → `{ version, buildTime }` (authenticated)
 - `GET /version/check` → compares against the `version` in `backend/package.json`
@@ -534,8 +534,15 @@ deliberately nulls the category on its transactions.
   — the idempotent dedup key for imports/syncs.
 - `Account` has `iban` and `institution` — maps a FinTrack account to a real bank
   account.
-- Import logic (`backend/src/routes/import.js`) upserts on that key. It does **not**
-  recalculate account balance; `POST /accounts/:id/recalculate` does that.
+- Import logic (`backend/src/routes/import.js`) upserts on that key, then
+  **recalculates every account the import touched** (`recalculateTouched`: the
+  target plus every `accountId`/`toAccountId` on rows created since the import
+  started). Transfer detection writes the *other* account onto TRANSFER rows, and
+  recalculating only the target left it stale — found with the diagnostics API: a
+  CAMT import of the current account moved €4,285 on the savings account and
+  €5,430 onto Revolut while both stored balances stayed put (v1.34.1). The Maybe,
+  generic (which previously recalculated nothing) and CAMT routes all use it, and
+  the transfer **convert/merge** actions now recalculate both accounts too.
 
 ## Dashboard widgets
 
@@ -717,6 +724,15 @@ in memory and **never writes** — it explains a wrong number instead of fixing 
   per currency instead, since their balance comes from holdings.
 - `.diagnostics.local` (repo root, gitignored) can hold the URL and key on two
   lines, so a helper can use the key from a shell without it appearing in chat.
+- Refinements from the first real run (v1.34.1): a drift finding says when every
+  row after the checkpoint is a transfer from another account's statement
+  (`ownActivityAfterAnchor === 0`) — then ↻ alone isn't the truth, "Set balance"
+  is. Identical rows with distinct bank references from one source are reported
+  as probably-real (`distinctBankRefs`), not as a double import. New
+  `transferMirrors`: a transfer that also exists as a loose income/expense row,
+  reported **only** when the loose row's counterparty IBAN is the other account's
+  (same-amount coincidences such as a €40 lottery ticket beside a €40 top-up are
+  not evidence).
 
 ## Conventions
 
