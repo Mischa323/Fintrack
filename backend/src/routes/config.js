@@ -1,3 +1,4 @@
+const crypto = require("crypto");
 const express = require("express");
 const { PrismaClient } = require("@prisma/client");
 const { clearAll } = require("../services/loginGuard");
@@ -25,6 +26,9 @@ router.get("/", async (req, res) => {
     loginBlockEnabled: s.loginBlockEnabled !== false,
     loginMaxAttempts: s.loginMaxAttempts ?? 5,
     loginBlockMinutes: s.loginBlockMinutes ?? 15,
+    // Only whether a diagnostics key is live and until when — never the key
+    diagnosticsKeyExpiresAt: s.diagnosticsKeyHash && s.diagnosticsKeyExpiresAt && new Date(s.diagnosticsKeyExpiresAt) > new Date()
+      ? s.diagnosticsKeyExpiresAt : null,
     aiUrl: s.aiUrl ?? "",
     aiModel: s.aiModel ?? "",
     aiVisionModel: s.aiVisionModel ?? "",
@@ -77,6 +81,26 @@ router.put("/", async (req, res) => {
 router.post("/login-blocks/clear", async (req, res) => {
   const cleared = await clearAll();
   res.json({ cleared });
+});
+
+// POST /config/diagnostics-key { hours } — create a temporary read-only key for
+// /diagnostics. The plaintext is returned once; only its SHA-256 is stored.
+// Creating a new key replaces the previous one.
+router.post("/diagnostics-key", async (req, res) => {
+  const hours = Math.min(168, Math.max(1, parseInt(req.body?.hours) || 24));
+  const key = `ftd_${crypto.randomBytes(24).toString("base64url")}`;
+  const expiresAt = new Date(Date.now() + hours * 60 * 60 * 1000);
+  await prisma.settings.update({
+    where: { id: "singleton" },
+    data: { diagnosticsKeyHash: crypto.createHash("sha256").update(key).digest("hex"), diagnosticsKeyExpiresAt: expiresAt },
+  });
+  res.json({ key, expiresAt });
+});
+
+// DELETE /config/diagnostics-key — revoke it immediately
+router.delete("/diagnostics-key", async (req, res) => {
+  await prisma.settings.update({ where: { id: "singleton" }, data: { diagnosticsKeyHash: null, diagnosticsKeyExpiresAt: null } });
+  res.json({ revoked: true });
 });
 
 module.exports = router;

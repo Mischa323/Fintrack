@@ -21,6 +21,7 @@ const versionRouter = require("./routes/version");
 const holdingsRouter = require("./routes/holdings");
 const aiRouter = require("./routes/ai");
 const receiptsRouter = require("./routes/receipts");
+const diagnosticsRouter = require("./routes/diagnostics");
 const { processRecurring } = require("./services/recurringService");
 const { runBackup } = require("./services/backupService");
 const { initJwtSecret } = require("./services/jwtSecret");
@@ -38,6 +39,10 @@ app.use(cookieParser());
 
 // Auth routes are public
 app.use("/auth", authRouter);
+
+// Read-only diagnostics carry their own guard (session JWT or a temporary
+// diagnostics key), so they sit before the global JWT middleware.
+app.use("/diagnostics", diagnosticsRouter);
 
 // All other routes require a valid JWT
 app.use(authMiddleware);

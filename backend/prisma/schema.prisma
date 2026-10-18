@@ -260,6 +260,9 @@ model Settings {
   loginBlockEnabled  Boolean  @default(true)
   loginMaxAttempts   Int      @default(5)
   loginBlockMinutes  Int      @default(15)
+  // Temporary read-only key for /diagnostics (SHA-256 hex; plaintext is shown once)
+  diagnosticsKeyHash      String?
+  diagnosticsKeyExpiresAt DateTime?
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
 }

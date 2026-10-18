@@ -88,7 +88,7 @@ To actually get Watchtower auto-updates, images must be published (GitHub Action
 
 `backend/package.json` `version` is the **single source of truth** — bump it on
 every meaningful change (keep `frontend/package.json` in sync for tidiness).
-Currently **1.33.0**.
+Currently **1.34.0**.
 
 - `GET /version` → `{ version, buildTime }` (authenticated)
 - `GET /version/check` → compares against the `version` in `backend/package.json`
@@ -687,6 +687,36 @@ layout-critical sizing was moved into CSS classes in `index.css` that a
 `stepValid`; the investment-account block and "switch to transfer" live on step 2;
 `save()` still does the final full validation. All prior behaviour is preserved
 (remembered account, inline category, subscription, edit mode → "Save changes").
+
+## Diagnostics API (v1.34.0)
+
+Read-only troubleshooting for "the import doesn't add up". `routes/diagnostics.js`
+(GET only; anything else is 405) over `services/diagnostics.js`, which recomputes
+in memory and **never writes** — it explains a wrong number instead of fixing it.
+
+- **Auth**: mounted *before* the global JWT middleware with its own guard — a
+  normal session (Bearer JWT) **or** `X-Diagnostics-Key`. The key is created in
+  Settings → Server → Diagnostics access (`POST /config/diagnostics-key {hours}`,
+  1–168h, default 24), shown once, stored only as SHA-256
+  (`Settings.diagnosticsKeyHash` + `diagnosticsKeyExpiresAt`), compared with
+  `timingSafeEqual`, revoked by `DELETE /config/diagnostics-key`. `/config` only
+  reports whether one is live and until when.
+- Endpoints: `/diagnostics/summary` (per-account balance check + plain-language
+  `findings`, worst first), `/imports` (import runs: rows by source clustered on
+  `createdAt` with a 5-minute gap), `/duplicates` (exact: same account/day/amount/
+  type/description; cross-source: same amount from two *different* sources ≤2 days
+  apart — the classic "imported the same period as CSV and as CAMT"), `/transfers`
+  (expense on one own account + income of the same amount on another within ±4
+  days; "iban" strength when a counterparty IBAN matches), `/transactions` (raw rows
+  incl. `externalId`, `importedFrom`, `createdAt`), `/report` (all of it; the
+  Settings "Download report" button saves it as JSON).
+- **Balance check** mirrors `sumTransactions`: `recomputedBalance` = opening +
+  movements **after** the "Set balance" anchor; `excludedBeforeAnchor` shows what
+  the anchor leaves out (often the answer to "I imported but the balance didn't
+  move"); `drift` = stored − recomputed. Investment accounts report holdings value
+  per currency instead, since their balance comes from holdings.
+- `.diagnostics.local` (repo root, gitignored) can hold the URL and key on two
+  lines, so a helper can use the key from a shell without it appearing in chat.
 
 ## Conventions
 

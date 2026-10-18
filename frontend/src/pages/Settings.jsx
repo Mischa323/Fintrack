@@ -648,6 +648,110 @@ function ServerConfig() {
   );
 }
 
+// ── Diagnostics access ────────────────────────────────────────
+// A temporary, read-only key for the /diagnostics API, so someone helping to
+// troubleshoot an import can inspect the data without your password. Shown once,
+// expires on its own, revocable at any time.
+function DiagnosticsAccess() {
+  const [expiresAt, setExpiresAt] = useState(null);
+  const [hours, setHours] = useState(24);
+  const [newKey, setNewKey] = useState(null);
+  const [msg, setMsg] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const apiBase = `${window.location.origin}/api/diagnostics`;
+
+  useEffect(() => { api.get("/config").then(r => setExpiresAt(r.data.diagnosticsKeyExpiresAt || null)); }, []);
+
+  const create = async () => {
+    setBusy(true); setMsg(null);
+    try {
+      const r = await api.post("/config/diagnostics-key", { hours });
+      setNewKey(r.data.key); setExpiresAt(r.data.expiresAt);
+    } catch (e) { setMsg({ type: "error", text: e.response?.data?.error || e.message }); }
+    finally { setBusy(false); }
+  };
+  const revoke = async () => {
+    setBusy(true); setMsg(null);
+    try {
+      await api.delete("/config/diagnostics-key");
+      setNewKey(null); setExpiresAt(null);
+      setMsg({ type: "success", text: "Diagnostics key revoked" });
+    } catch (e) { setMsg({ type: "error", text: e.response?.data?.error || e.message }); }
+    finally { setBusy(false); }
+  };
+  const copy = async (text, what) => {
+    try { await navigator.clipboard.writeText(text); setMsg({ type: "success", text: `${what} copied` }); }
+    catch { setMsg({ type: "error", text: "Copy failed — select the text and copy it by hand" }); }
+  };
+  const download = async () => {
+    setBusy(true); setMsg(null);
+    try {
+      const r = await api.get("/diagnostics/report", { responseType: "blob" });
+      const url = URL.createObjectURL(r.data);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `fintrack-diagnostics-${new Date().toISOString().slice(0, 10)}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (e) { setMsg({ type: "error", text: e.response?.data?.error || e.message }); }
+    finally { setBusy(false); }
+  };
+
+  const code = { fontFamily: "monospace", fontSize: 12, background: "rgba(0,0,0,0.3)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, padding: "8px 10px", wordBreak: "break-all" };
+
+  return (
+    <div>
+      <p style={{ color: "rgba(255,255,255,0.5)", fontSize: 13, margin: "0 0 14px", lineHeight: 1.7 }}>
+        A temporary, <strong style={{ color: "rgba(255,255,255,0.75)" }}>read-only</strong> key for the diagnostics API
+        (<code>{apiBase}</code>). It lets someone helping you check why imported numbers don't add up —
+        balance drift, duplicates, double-counted transfers — without your password. It can read but never
+        change anything, expires on its own, and you can revoke it here at any time.
+      </p>
+      <Alert type={msg?.type} message={msg?.text} />
+
+      {expiresAt ? (
+        <div style={{ fontSize: 13, color: "#fbbf24", marginBottom: 12 }}>
+          🔓 A diagnostics key is active until {new Date(expiresAt).toLocaleString("nl-NL")}.
+        </div>
+      ) : (
+        <div style={{ fontSize: 13, color: "rgba(255,255,255,0.4)", marginBottom: 12 }}>🔒 No diagnostics key is active.</div>
+      )}
+
+      {newKey && (
+        <div style={{ padding: "12px 14px", borderRadius: 10, background: "rgba(251,191,36,0.08)", border: "1px solid rgba(251,191,36,0.3)", marginBottom: 14 }}>
+          <div style={{ fontSize: 12, color: "#fbbf24", fontWeight: 600, marginBottom: 8 }}>Copy it now — it won't be shown again.</div>
+          <div style={code}>{newKey}</div>
+          <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
+            <button type="button" className="glass-btn glass-btn-ghost" style={{ padding: "6px 12px", fontSize: 12 }} onClick={() => copy(newKey, "Key")}>Copy key</button>
+            <button type="button" className="glass-btn glass-btn-ghost" style={{ padding: "6px 12px", fontSize: 12 }} onClick={() => copy(`${apiBase}\n${newKey}\n`, "URL + key")}>Copy URL + key</button>
+          </div>
+          <div style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", marginTop: 8, lineHeight: 1.6 }}>
+            Send it as the <code>X-Diagnostics-Key</code> header, e.g. <code>curl -H "X-Diagnostics-Key: …" {apiBase}/summary</code>
+          </div>
+        </div>
+      )}
+
+      <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+        <select className="glass-input" style={{ ...sel, width: "auto" }} value={hours} onChange={e => setHours(Number(e.target.value))}>
+          <option value={1}>Valid 1 hour</option>
+          <option value={24}>Valid 24 hours</option>
+          <option value={72}>Valid 3 days</option>
+          <option value={168}>Valid 7 days</option>
+        </select>
+        <button type="button" className="glass-btn glass-btn-primary" style={{ padding: "9px 16px" }} onClick={create} disabled={busy}>
+          {expiresAt ? "Replace key" : "Create diagnostics key"}
+        </button>
+        {expiresAt && (
+          <button type="button" className="glass-btn glass-btn-danger" style={{ padding: "9px 16px" }} onClick={revoke} disabled={busy}>Revoke</button>
+        )}
+        <button type="button" className="glass-btn glass-btn-ghost" style={{ padding: "9px 16px" }} onClick={download} disabled={busy}>
+          ⬇ Download report
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // ── Local AI (Ollama) ─────────────────────────────────────────
 function AiConfig() {
   const [config, setConfig] = useState({ aiUrl: "", aiModel: "", aiVisionModel: "", aiLanguage: "" });
@@ -1216,6 +1320,8 @@ export default function Settings() {
           <>
             <SectionTitle>Server configuration</SectionTitle>
             <ServerConfig />
+            <SectionTitle>Diagnostics access</SectionTitle>
+            <DiagnosticsAccess />
           </>
         )}
 
